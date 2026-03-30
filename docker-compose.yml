@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: vexis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vexis_db
+      POSTGRES_USER: vexis
+      POSTGRES_PASSWORD: password
+    ports:
+      # Use 5433 on the host to avoid conflicts with any local Postgres already on 5432.
+      - "5433:5432"
+    volumes:
+      - vexis_pgdata:/var/lib/postgresql/data
+
+volumes:
+  vexis_pgdata:
+
