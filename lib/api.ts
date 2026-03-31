@@ -8,7 +8,7 @@ export async function apiFetch<T>(
 ): Promise<T> {
   if (!BASE_URL) {
     const msg =
-      "Missing NEXT_PUBLIC_API_URL. Set NEXT_PUBLIC_API_URL=http://localhost:8080 for local dev, and set it to your deployed Go backend URL in Vercel.";
+      "Missing NEXT_PUBLIC_API_URL. Set NEXT_PUBLIC_API_URL to the public base URL of your Go backend (no trailing slash).";
     if (typeof window !== "undefined") {
       // eslint-disable-next-line no-console
       console.error(msg);

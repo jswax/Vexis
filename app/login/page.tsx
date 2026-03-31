@@ -208,11 +208,16 @@ function LoginContent() {
                       method: "POST",
                       body: JSON.stringify({ email, otp }),
                     });
+                    // Immediately validate that the HttpOnly cookie session is usable.
+                    // If this fails, the browser likely blocked the cross-site cookie or CORS credentials.
+                    await apiFetch("/auth/me");
                     window.dispatchEvent(new Event("vexis-auth-changed"));
                     router.push("/dashboard");
                   } catch (err) {
                     setError(
-                      err instanceof Error ? err.message : "Verification failed",
+                      err instanceof Error
+                        ? err.message
+                        : "Verification failed",
                     );
                   } finally {
                     setLoading(false);

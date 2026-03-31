@@ -3,7 +3,8 @@ package routes
 import (
 	"errors"
 	"net/http"
-	"os"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,17 +18,106 @@ import (
 	"vexis-backend/notify"
 )
 
+func requestIsHTTPS(c *gin.Context) bool {
+	if c.Request.TLS != nil {
+		return true
+	}
+	xfp := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto"))
+	return strings.EqualFold(xfp, "https")
+}
+
+// effectiveRequestHost is the public hostname clients use (Railway/proxy aware).
+func effectiveRequestHost(c *gin.Context) string {
+	h := strings.TrimSpace(c.Request.Host)
+	if h != "" {
+		if i := strings.IndexByte(h, ':'); i > 0 {
+			port := h[i+1:]
+			ok := true
+			for _, r := range port {
+				if r < '0' || r > '9' {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				h = h[:i]
+			}
+		}
+		return strings.ToLower(h)
+	}
+	xfwd := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	if xfwd == "" {
+		return ""
+	}
+	if i := strings.IndexByte(xfwd, ','); i >= 0 {
+		xfwd = strings.TrimSpace(xfwd[:i])
+	}
+	if i := strings.IndexByte(xfwd, ':'); i > 0 {
+		tail := xfwd[i+1:]
+		isPort := true
+		for _, r := range tail {
+			if r < '0' || r > '9' {
+				isPort = false
+				break
+			}
+		}
+		if isPort {
+			xfwd = xfwd[:i]
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(xfwd))
+}
+
+func cookieSameSite(c *gin.Context) http.SameSite {
+	origin := strings.TrimSpace(c.GetHeader("Origin"))
+	if origin == "" {
+		// Non-browser clients or same-origin navigation.
+		return http.SameSiteLaxMode
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return http.SameSiteLaxMode
+	}
+	originHost := strings.ToLower(u.Hostname())
+	if originHost == "" {
+		return http.SameSiteLaxMode
+	}
+
+	reqHost := effectiveRequestHost(c)
+	// Cross-site fetch (e.g. localhost:3000 → *.railway.app) requires SameSite=None; Secure.
+	// SameSite=Lax cookies are NOT sent on cross-site subresource/XHR/fetch — only on top-level GET.
+	if reqHost == "" || originHost != reqHost {
+		return http.SameSiteNoneMode
+	}
+	return http.SameSiteLaxMode
+}
+
 func setAuthCookie(c *gin.Context, jwt string) {
-	secure := os.Getenv("GIN_MODE") == "release"
-	c.SetCookie("vexis_token", jwt, 60*60*24*7, "/", "", secure, true)
-	// SameSite=Strict (Go stdlib doesn't expose via gin helper; set explicitly).
-	c.Header("Set-Cookie", c.Writer.Header().Get("Set-Cookie")+"; SameSite=Strict")
+	ss := cookieSameSite(c)
+	secure := requestIsHTTPS(c) || ss == http.SameSiteNoneMode
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "vexis_token",
+		Value:    jwt,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: ss,
+		MaxAge:   60 * 60 * 24 * 7,
+	})
 }
 
 func clearAuthCookie(c *gin.Context) {
-	secure := os.Getenv("GIN_MODE") == "release"
-	c.SetCookie("vexis_token", "", -1, "/", "", secure, true)
-	c.Header("Set-Cookie", c.Writer.Header().Get("Set-Cookie")+"; SameSite=Strict")
+	ss := cookieSameSite(c)
+	secure := requestIsHTTPS(c) || ss == http.SameSiteNoneMode
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "vexis_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: ss,
+		MaxAge:   -1,
+	})
 }
 
 func RegisterAuth(r *gin.Engine, database *gorm.DB, cfg *config.Config) {
