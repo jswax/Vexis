@@ -11,6 +11,15 @@ import { apiFetch } from "@/lib/api";
 const proCtaClassName =
   "inline-flex h-11 w-full items-center justify-center rounded-full bg-accent px-5 text-sm font-semibold text-white shadow-sm transition hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)]";
 
+const freeCtaClassName =
+  "inline-flex h-11 w-full items-center justify-center rounded-full border border-foreground bg-white px-5 text-sm font-semibold text-foreground transition shadow-sm hover:bg-surface";
+
+const freeTierCurrentClassName =
+  "inline-flex h-11 w-full cursor-not-allowed items-center justify-center rounded-full border border-border bg-surface px-5 text-sm font-semibold text-muted-foreground opacity-80 select-none";
+
+const proTierCurrentClassName =
+  "inline-flex h-11 w-full cursor-not-allowed items-center justify-center rounded-full border border-white/25 bg-white/10 px-5 text-sm font-semibold text-white/70 opacity-95 select-none";
+
 type Session =
   | { kind: "loading" }
   | { kind: "out" }
@@ -92,12 +101,12 @@ export function PricingCards() {
 
   return (
     <>
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid items-stretch gap-6 md:grid-cols-2">
         {tiers.map((t) => (
           <motion.div
             key={t.name}
             className={[
-              "relative overflow-hidden",
+              "relative flex h-full min-h-0 flex-col overflow-hidden",
               t.featured
                 ? "rounded-2xl bg-foreground p-7 text-white shadow-[0_4px_12px_rgba(0,0,0,0.08)]"
                 : "rounded-2xl border border-border bg-white p-7 shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
@@ -105,36 +114,36 @@ export function PricingCards() {
             whileHover={{ scale: 1.02 }}
             transition={{ type: "spring", stiffness: 260, damping: 20 }}
           >
-            {t.featured ? (
-              <div className="absolute right-5 top-5 rounded-full bg-accent px-3 py-1 text-xs font-semibold tracking-wide text-white">
-                Most Popular
+            <div className="flex shrink-0 items-start justify-between gap-4">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                <h3
+                  className={[
+                    "font-[var(--font-display)] text-3xl font-semibold tracking-[-0.04em]",
+                    t.featured ? "text-white" : "text-foreground",
+                  ].join(" ")}
+                >
+                  {t.name}
+                </h3>
+                {t.featured ? (
+                  <span className="inline-flex shrink-0 whitespace-nowrap rounded-full bg-accent px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white sm:text-xs">
+                    Most Popular
+                  </span>
+                ) : null}
               </div>
-            ) : null}
-
-            <div className="flex items-baseline justify-between gap-6">
-              <h3
-                className={[
-                  "font-[var(--font-display)] text-3xl font-semibold tracking-[-0.04em]",
-                  t.featured ? "text-white" : "text-foreground",
-                ].join(" ")}
-              >
-                {t.name}
-              </h3>
-              <div className="text-right">
+              <div className="shrink-0 text-right">
                 <div
                   className={[
-                    "text-3xl font-semibold tracking-[-0.03em]",
+                    "text-3xl font-semibold leading-none tracking-[-0.03em]",
                     t.featured ? "text-white" : "text-foreground",
                   ].join(" ")}
                 >
                   {t.price}
                 </div>
                 <div
-                  className={
-                    t.featured
-                      ? "text-xs text-white/70"
-                      : "text-xs text-muted-foreground"
-                  }
+                  className={[
+                    "mt-1.5 text-right text-xs leading-snug",
+                    t.featured ? "text-white/70" : "text-muted-foreground",
+                  ].join(" ")}
                 >
                   {t.note}
                 </div>
@@ -143,7 +152,7 @@ export function PricingCards() {
 
             <motion.ul
               className={[
-                "mt-7 space-y-3 text-sm",
+                "mt-7 shrink-0 space-y-3 text-sm",
                 t.featured ? "text-white/80" : "text-muted-foreground",
               ].join(" ")}
               initial="hidden"
@@ -182,7 +191,7 @@ export function PricingCards() {
               ))}
             </motion.ul>
 
-            <div className="mt-8">
+            <div className="mt-auto pt-8">
               {t === proTier ? (
                 session.kind === "loading" ? (
                   <div
@@ -194,9 +203,12 @@ export function PricingCards() {
                     {t.cta}
                   </Link>
                 ) : session.plan === "pro" ? (
-                  <Link href="/dashboard" className={proCtaClassName}>
-                    {t.cta}
-                  </Link>
+                  <span
+                    className={proTierCurrentClassName}
+                    aria-current="true"
+                  >
+                    Current tier
+                  </span>
                 ) : (
                   <button
                     type="button"
@@ -209,13 +221,29 @@ export function PricingCards() {
                     {t.cta}
                   </button>
                 )
-              ) : (
-                <Link
-                  href={freeTier.href}
-                  className="inline-flex h-11 w-full items-center justify-center rounded-full border border-foreground bg-white px-5 text-sm font-semibold text-foreground transition shadow-sm hover:bg-surface"
-                >
+              ) : session.kind === "loading" ? (
+                <div
+                  className="h-11 w-full animate-pulse rounded-full bg-foreground/10"
+                  aria-hidden
+                />
+              ) : session.kind === "out" ? (
+                <Link href={freeTier.href} className={freeCtaClassName}>
                   {t.cta}
                 </Link>
+              ) : session.plan === "free" ? (
+                <span
+                  className={freeTierCurrentClassName}
+                  aria-current="true"
+                >
+                  Current tier
+                </span>
+              ) : (
+                <span
+                  className={freeTierCurrentClassName}
+                  aria-disabled
+                >
+                  You&apos;re on Pro
+                </span>
               )}
             </div>
           </motion.div>
