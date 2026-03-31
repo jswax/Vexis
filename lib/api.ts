@@ -1,4 +1,4 @@
-const SERVER_BASE_URL = "http://localhost:8080";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 type ApiError = Error & { status?: number };
 
@@ -8,7 +8,7 @@ export async function apiFetch<T>(
 ): Promise<T> {
   // In the browser, prefer the Next rewrite to avoid CORS.
   const baseUrl =
-    typeof window === "undefined" ? SERVER_BASE_URL : "/api";
+    typeof window === "undefined" ? BASE_URL : "/api";
 
   const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 
