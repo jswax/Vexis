@@ -80,14 +80,13 @@ func main() {
 	}))
 	engine.Use(gin.Recovery())
 
-	allowedOrigins := []string{"http://localhost:3000"}
-	if cfg.GinMode == gin.ReleaseMode {
-		allowedOrigins = []string{cfg.AllowedOrigin}
-	}
+	// CORS must allow exact origins (not "*") when using cookies.
+	// Configure via ALLOWED_ORIGINS (comma-separated).
+	allowedOrigins := cfg.AllowedOrigins
 
 	engine.Use(cors.New(cors.Config{
 		AllowOrigins:     allowedOrigins,
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
 		AllowHeaders:     []string{"Authorization", "Content-Type"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,

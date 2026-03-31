@@ -30,7 +30,7 @@ In `backend/.env`:
 - `PORT=8080`
 - `TRADINGVIEW_WEBHOOK_URL=https://...` (supports comma-separated URLs)
 - `ALERT_SECRET=change_me` (used to authenticate `/alerts/trigger`)
-- `ALLOWED_ORIGIN=http://localhost:3000` (used only when `GIN_MODE=release`)
+- `ALLOWED_ORIGINS=http://localhost:3000,https://vexis-eight.vercel.app` (comma-separated)
 - `GIN_MODE=debug` (set to `release` in production)
 
 ## Run the server
@@ -74,5 +74,5 @@ Notes:
 
 ## CORS
 
-In dev (`GIN_MODE!=release`), CORS is locked to `http://localhost:3000`. In `release`, it uses `ALLOWED_ORIGIN`.
+CORS uses `ALLOWED_ORIGINS` (comma-separated). When auth uses cookies, origins must be explicit (no `"*"`), and `Allow-Credentials` must be enabled.
 
