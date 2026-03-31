@@ -15,15 +15,22 @@ import (
 func RequireAuth(jwtSecret string, database *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing Authorization header"})
-			return
-		}
-
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token == authHeader {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid Authorization header"})
-			return
+		token := ""
+		if authHeader != "" {
+			t := strings.TrimPrefix(authHeader, "Bearer ")
+			if t == authHeader {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid Authorization header"})
+				return
+			}
+			token = t
+		} else {
+			// Prefer HttpOnly cookie in browsers (Vercel/production).
+			cookie, err := c.Cookie("vexis_token")
+			if err != nil || cookie == "" {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+				return
+			}
+			token = cookie
 		}
 
 		claims, err := auth.VerifyJWT(token, jwtSecret)

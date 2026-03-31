@@ -12,6 +12,7 @@ function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const resetToken = searchParams.get("reset");
+  const verifyEmailToken = searchParams.get("verify_email_token");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -25,6 +26,24 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (verifyEmailToken) {
+      (async () => {
+        setError(null);
+        setInfo("Verifying your email…");
+        try {
+          await apiFetch(`/auth/verify-email?token=${encodeURIComponent(verifyEmailToken)}`);
+          setInfo(
+            "Email verified. Sign in with your password, then enter the SMS code to finish setup.",
+          );
+          // Remove token from URL.
+          router.replace("/login?email_verified=1");
+        } catch (err) {
+          setError(
+            err instanceof Error ? err.message : "Email verification failed.",
+          );
+        }
+      })();
+    }
     if (searchParams.get("email_verified") === "1") {
       setInfo(
         "Email verified. Sign in with your password, then enter the SMS code to finish setup.",
@@ -38,7 +57,7 @@ function LoginContent() {
         "Could not send the phone verification text. Open the email link again to retry.",
       );
     }
-  }, [searchParams]);
+  }, [searchParams, verifyEmailToken, router]);
 
   const emailOk = /^\S+@\S+\.\S+$/.test(email);
   const passwordOk = password.length >= 8;

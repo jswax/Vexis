@@ -2,6 +2,16 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+## Environment (required for auth in production)
+
+The frontend talks directly to the Go backend.
+
+- Set `NEXT_PUBLIC_API_URL` to the public base URL of the Go backend (no trailing slash).
+  - Local dev: `NEXT_PUBLIC_API_URL=http://localhost:8080`
+  - Production (Vercel): `NEXT_PUBLIC_API_URL=https://<your-backend-domain>`
+
+Create `.env.local` from `.env.local.example`.
+
 First, run the development server:
 
 ```bash

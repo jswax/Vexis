@@ -48,10 +48,12 @@ On startup it runs GORM auto-migrations for:
 
 ## Auth API
 
-- `POST /auth/register` → `{ email, password }` → returns `{ token }`
-- `POST /auth/login` → `{ email, password }` → returns `{ token }`
-- `POST /auth/logout` → returns `{ ok: true }` (stateless)
-- `GET /auth/me` → protected (Bearer token) → returns current user
+- `POST /auth/register` → `{ email, password, phone_number, tradingview_username? }` → returns `{ ok, message }` and sends a verification email
+- `GET /auth/verify-email?token=...` → creates the account after email verification and triggers phone OTP delivery
+- `POST /auth/login` → `{ email, password }` → returns `{ requires_otp: true }` and triggers login OTP delivery (or returns `{ requires_otp: true, otp_phase: "signup_phone" }` if phone not verified)
+- `POST /auth/verify-otp` → `{ email, otp }` → sets `vexis_token` HttpOnly cookie on success
+- `POST /auth/logout` → deletes session and clears cookie
+- `GET /auth/me` → protected (HttpOnly cookie or Bearer token) → returns current user
 
 ## Alert pipeline
 

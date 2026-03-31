@@ -3,6 +3,7 @@ package routes
 import (
 	"errors"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,19 @@ import (
 	"vexis-backend/models"
 	"vexis-backend/notify"
 )
+
+func setAuthCookie(c *gin.Context, jwt string) {
+	secure := os.Getenv("GIN_MODE") == "release"
+	c.SetCookie("vexis_token", jwt, 60*60*24*7, "/", "", secure, true)
+	// SameSite=Strict (Go stdlib doesn't expose via gin helper; set explicitly).
+	c.Header("Set-Cookie", c.Writer.Header().Get("Set-Cookie")+"; SameSite=Strict")
+}
+
+func clearAuthCookie(c *gin.Context) {
+	secure := os.Getenv("GIN_MODE") == "release"
+	c.SetCookie("vexis_token", "", -1, "/", "", secure, true)
+	c.Header("Set-Cookie", c.Writer.Header().Get("Set-Cookie")+"; SameSite=Strict")
+}
 
 func RegisterAuth(r *gin.Engine, database *gorm.DB, cfg *config.Config) {
 	pub := r.Group("/auth")
@@ -83,7 +97,8 @@ func registerHandler(database *gorm.DB, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 		now := time.Now().UTC()
-		verifyURL := stringsTrimSlash(cfg.AppURL) + "/api/auth/verify-email?token=" + emailToken
+		// Link points to the frontend login page, which completes verification.
+		verifyURL := stringsTrimSlash(cfg.AppURL) + "/login?verify_email_token=" + emailToken
 
 		pending := models.PendingSignup{
 			Email:               email,
@@ -254,7 +269,8 @@ func verifyOTPHandler(database *gorm.DB, cfg *config.Config) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"token": jwtStr})
+			setAuthCookie(c, jwtStr)
+			c.JSON(http.StatusOK, gin.H{"ok": true})
 			return
 		}
 
@@ -279,7 +295,8 @@ func verifyOTPHandler(database *gorm.DB, cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"token": jwtStr})
+		setAuthCookie(c, jwtStr)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 
@@ -500,6 +517,7 @@ func logoutHandler(database *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		database.Where("id = ?", sid.(string)).Delete(&models.Session{})
+		clearAuthCookie(c)
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
