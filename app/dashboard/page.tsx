@@ -20,13 +20,6 @@ export default function DashboardPage() {
     (async () => {
       try {
         const me = await apiFetch<Me>("/auth/me");
-        if (me.plan !== "pro") {
-          router.replace(
-            "/pricing?message=" +
-              encodeURIComponent("Upgrade to Pro to access the dashboard"),
-          );
-          return;
-        }
         setEmail(me.email);
       } catch {
         router.replace("/login");
@@ -41,7 +34,7 @@ export default function DashboardPage() {
       <PageHeader
         eyebrow="DASHBOARD"
         title="Signal control center."
-        description="Pro workspace for your trading signals."
+        description="Your workspace for trading signals."
       />
       <Container>
         <div className="py-12">

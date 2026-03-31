@@ -8,11 +8,17 @@ import { Container } from "@/components/Container";
 import { PageHeader } from "@/components/PageHeader";
 import { apiFetch } from "@/lib/api";
 
+function safeNextPath(raw: string | null): string | null {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
+}
+
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const resetToken = searchParams.get("reset");
   const verifyEmailToken = searchParams.get("verify_email_token");
+  const nextPath = safeNextPath(searchParams.get("next"));
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -187,7 +193,7 @@ function LoginContent() {
                         setNeedsOtp(true);
                       } else {
                         window.dispatchEvent(new Event("vexis-auth-changed"));
-                        router.push("/dashboard");
+                        router.push(nextPath ?? "/dashboard");
                       }
                     } catch (err) {
                       setError(
@@ -212,7 +218,7 @@ function LoginContent() {
                     // If this fails, the browser likely blocked the cross-site cookie or CORS credentials.
                     await apiFetch("/auth/me");
                     window.dispatchEvent(new Event("vexis-auth-changed"));
-                    router.push("/dashboard");
+                    router.push(nextPath ?? "/dashboard");
                   } catch (err) {
                     setError(
                       err instanceof Error

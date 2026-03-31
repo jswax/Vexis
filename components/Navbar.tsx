@@ -24,12 +24,10 @@ export function Navbar() {
     const base = [...navPublic];
     if (authed) {
       base.push({ href: "/profile", label: "Profile" });
-      if (plan === "pro") {
-        base.push({ href: "/dashboard", label: "Dashboard" });
-      }
+      base.push({ href: "/dashboard", label: "Dashboard" });
     }
     return base;
-  }, [authed, plan]);
+  }, [authed]);
 
   useEffect(() => {
     const check = async () => {

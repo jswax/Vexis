@@ -134,6 +134,7 @@ func RegisterAuth(r *gin.Engine, database *gorm.DB, cfg *config.Config) {
 	pvt.Use(middleware.RequireAuth(cfg.JWTSecret, database))
 	{
 		pvt.GET("/auth/me", MeHandler())
+		pvt.POST("/auth/upgrade-pro", upgradeProHandler(database))
 		pvt.POST("/auth/logout", logoutHandler(database))
 		pvt.POST("/auth/change-password", changePasswordHandler(database, cfg))
 		pvt.POST("/auth/profile/tradingview", profileTradingviewHandler(database))
@@ -763,6 +764,21 @@ func profilePhoneVerifyHandler(database *gorm.DB, _ *config.Config) gin.HandlerF
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func upgradeProHandler(database *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := c.MustGet("user").(models.User)
+		if u.Plan == "pro" {
+			c.JSON(http.StatusOK, gin.H{"plan": "pro"})
+			return
+		}
+		if err := database.Model(&models.User{}).Where("id = ?", u.ID).Update("plan", "pro").Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update plan"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"plan": "pro"})
 	}
 }
 

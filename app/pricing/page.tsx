@@ -24,7 +24,7 @@ export default function PricingPage() {
       <PageHeader
         eyebrow="PRICING"
         title="Choose your tier."
-        description="Choose Free or Pro. Payments are not connected yet."
+        description="Free by default. Confirm in a short dialog to enable Pro on your account—no payment yet."
       />
       <Container>
         <div className="py-12">
