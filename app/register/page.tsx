@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Container } from "@/components/Container";
@@ -9,21 +8,29 @@ import { PageHeader } from "@/components/PageHeader";
 import { apiFetch } from "@/lib/api";
 
 export default function RegisterPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [tradingviewUsername, setTradingviewUsername] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [devVerifyUrl, setDevVerifyUrl] = useState<string | null>(null);
+  const [registrationComplete, setRegistrationComplete] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const emailOk = /^\S+@\S+\.\S+$/.test(email);
   const passwordOk = password.length >= 8;
+  const phoneOk =
+    phoneNumber.length >= 10 &&
+    phoneNumber.startsWith("+") &&
+    /^\+[0-9]+$/.test(phoneNumber);
 
   return (
     <div>
       <PageHeader
         eyebrow="REGISTER"
         title="Create your Vexis account."
-        description="Placeholder copy. Auth is wired to the backend."
+        description="You will verify your email and phone before you can sign in."
       />
       <Container>
         <div className="py-12">
@@ -32,7 +39,12 @@ export default function RegisterPage() {
               className="grid gap-4"
               onSubmit={async (e) => {
                 e.preventDefault();
+                if (registrationComplete) {
+                  return;
+                }
                 setError(null);
+                setInfo(null);
+                setDevVerifyUrl(null);
                 if (!emailOk) {
                   setError("Please enter a valid email.");
                   return;
@@ -41,14 +53,35 @@ export default function RegisterPage() {
                   setError("Password must be at least 8 characters.");
                   return;
                 }
+                if (!phoneOk) {
+                  setError(
+                    "Phone must be in E.164 format (e.g. +15551234567).",
+                  );
+                  return;
+                }
                 setLoading(true);
                 try {
-                  await apiFetch<{ ok: true }>("/auth/register", {
+                  const res = await apiFetch<{
+                    dev_email_verify_url?: string;
+                  }>("/auth/register", {
                     method: "POST",
-                    body: JSON.stringify({ email, password }),
+                    body: JSON.stringify({
+                      email,
+                      password,
+                      phone_number: phoneNumber,
+                      tradingview_username:
+                        tradingviewUsername.trim() || undefined,
+                    }),
                   });
-                  window.dispatchEvent(new Event("vexis-auth-changed"));
-                  router.push("/dashboard");
+                  setRegistrationComplete(true);
+                  setInfo(
+                    "Check your email and verify your account using the link we sent. You can sign in only after your email is verified.",
+                  );
+                  setDevVerifyUrl(
+                    typeof res.dev_email_verify_url === "string"
+                      ? res.dev_email_verify_url
+                      : null,
+                  );
                 } catch (err) {
                   setError(
                     err instanceof Error ? err.message : "Registration failed",
@@ -64,10 +97,11 @@ export default function RegisterPage() {
                 </span>
                 <input
                   type="email"
-                  placeholder="placeholder@email.com"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                  disabled={registrationComplete}
+                  className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </label>
 
@@ -77,10 +111,40 @@ export default function RegisterPage() {
                 </span>
                 <input
                   type="password"
-                  placeholder="••••••••"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                  disabled={registrationComplete}
+                  className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">
+                  PHONE (E.164)
+                </span>
+                <input
+                  type="tel"
+                  autoComplete="tel"
+                  placeholder="+15551234567"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  disabled={registrationComplete}
+                  className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">
+                  TRADINGVIEW USERNAME (OPTIONAL)
+                </span>
+                <input
+                  type="text"
+                  autoComplete="username"
+                  value={tradingviewUsername}
+                  onChange={(e) => setTradingviewUsername(e.target.value)}
+                  disabled={registrationComplete}
+                  className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </label>
 
@@ -89,10 +153,26 @@ export default function RegisterPage() {
                   {error}
                 </div>
               ) : null}
+              {info ? (
+                <div className="grid gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  <p>{info}</p>
+                  {devVerifyUrl ? (
+                    <p className="text-xs text-emerald-900/80">
+                      <span className="font-medium">Local testing:</span>{" "}
+                      <a
+                        href={devVerifyUrl}
+                        className="break-all text-accent underline underline-offset-2"
+                      >
+                        Open verification link
+                      </a>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || registrationComplete}
                 className="mt-2 inline-flex h-11 items-center justify-center gap-2 rounded-md bg-accent px-5 text-sm font-semibold text-white shadow-sm transition hover:shadow-md hover:scale-[1.01] disabled:opacity-60 disabled:hover:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
               >
                 {loading ? (
@@ -100,6 +180,8 @@ export default function RegisterPage() {
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                     Creating…
                   </>
+                ) : registrationComplete ? (
+                  "Account pending verification"
                 ) : (
                   "Create account"
                 )}
@@ -123,4 +205,3 @@ export default function RegisterPage() {
     </div>
   );
 }
-

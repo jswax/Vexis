@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
 
-  const res = await fetch(`${BACKEND_BASE_URL}/auth/register`, {
+  const res = await fetch(`${BACKEND_BASE_URL}/auth/reset-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -22,6 +22,5 @@ export async function POST(req: Request) {
       { status: res.status },
     );
   }
-
-  return NextResponse.json(data ?? { ok: true }, { status: res.status });
+  return NextResponse.json(data ?? { ok: true }, { status: 200 });
 }

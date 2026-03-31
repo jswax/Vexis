@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -13,6 +14,27 @@ type Config struct {
 	AlertSecret           string
 	AllowedOrigin         string
 	GinMode               string
+	AppURL                string
+
+	// SMSBypass skips Twilio (logs OTP server-side; API may include dev_otp). Never use in production.
+	SMSBypass bool
+	// EmailBypass skips SendGrid/SMTP (logs links; API may include dev_email_verify_url). Never use in production.
+	EmailBypass bool
+	TwilioAccountSID  string
+	TwilioAuthToken   string
+	TwilioPhoneNumber string
+
+	SendgridAPIKey string
+	SMTPHost       string
+	SMTPPort       string
+	SMTPUser       string
+	SMTPPassword   string
+	FromEmail      string
+}
+
+func envTruthy(key string) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 func Load() (Config, error) {
@@ -24,6 +46,20 @@ func Load() (Config, error) {
 		AlertSecret:           os.Getenv("ALERT_SECRET"),
 		AllowedOrigin:         os.Getenv("ALLOWED_ORIGIN"),
 		GinMode:               os.Getenv("GIN_MODE"),
+		AppURL:                os.Getenv("APP_URL"),
+
+		SMSBypass:         envTruthy("SMS_BYPASS"),
+		EmailBypass:       envTruthy("EMAIL_BYPASS"),
+		TwilioAccountSID:  os.Getenv("TWILIO_ACCOUNT_SID"),
+		TwilioAuthToken:   os.Getenv("TWILIO_AUTH_TOKEN"),
+		TwilioPhoneNumber: os.Getenv("TWILIO_PHONE_NUMBER"),
+
+		SendgridAPIKey: strings.TrimSpace(os.Getenv("SENDGRID_API_KEY")),
+		SMTPHost:       os.Getenv("SMTP_HOST"),
+		SMTPPort:       os.Getenv("SMTP_PORT"),
+		SMTPUser:       os.Getenv("SMTP_USER"),
+		SMTPPassword:   os.Getenv("SMTP_PASSWORD"),
+		FromEmail:      strings.TrimSpace(os.Getenv("FROM_EMAIL")),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -40,6 +76,29 @@ func Load() (Config, error) {
 	}
 	if cfg.AllowedOrigin == "" {
 		return Config{}, errors.New("ALLOWED_ORIGIN is required")
+	}
+	if cfg.AppURL == "" {
+		return Config{}, errors.New("APP_URL is required")
+	}
+	if !cfg.SMSBypass &&
+		(cfg.TwilioAccountSID == "" || cfg.TwilioAuthToken == "" || cfg.TwilioPhoneNumber == "") {
+		return Config{}, errors.New("TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER are required (or set SMS_BYPASS=true for local dev)")
+	}
+	if !cfg.EmailBypass {
+		hasSendgrid := cfg.SendgridAPIKey != ""
+		hasSMTP := cfg.SMTPHost != "" && cfg.SMTPPort != "" && cfg.SMTPUser != "" && cfg.SMTPPassword != ""
+		if !hasSendgrid && !hasSMTP {
+			return Config{}, errors.New("either SENDGRID_API_KEY or SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD are required (or set EMAIL_BYPASS=true for local dev)")
+		}
+		if hasSendgrid {
+			if cfg.FromEmail == "" {
+				return Config{}, errors.New("FROM_EMAIL is required when SENDGRID_API_KEY is set — use the exact address verified under SendGrid → Settings → Sender Authentication")
+			}
+			fe := strings.ToLower(cfg.FromEmail)
+			if strings.Contains(fe, "localhost") || strings.HasSuffix(fe, "@example.com") {
+				return Config{}, errors.New("FROM_EMAIL must be a real verified sender in SendGrid, not localhost or example.com — see https://app.sendgrid.com/settings/sender_auth")
+			}
+		}
 	}
 	return cfg, nil
 }

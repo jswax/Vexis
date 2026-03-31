@@ -18,27 +18,36 @@ export function Navbar() {
   const pathname = usePathname() ?? "/";
   const [scrolled, setScrolled] = useState(false);
   const [authed, setAuthed] = useState(false);
+  const [plan, setPlan] = useState<"free" | "pro" | null>(null);
 
   const items = useMemo(() => {
     const base = [...navPublic];
-    if (authed) base.push({ href: "/dashboard", label: "Dashboard" });
+    if (authed) {
+      base.push({ href: "/profile", label: "Profile" });
+      if (plan === "pro") {
+        base.push({ href: "/dashboard", label: "Dashboard" });
+      }
+    }
     return base;
-  }, [authed]);
+  }, [authed, plan]);
 
   useEffect(() => {
     const check = async () => {
       try {
-        await apiFetch("/auth/me");
+        const me = await apiFetch<{ plan: string }>("/auth/me");
         setAuthed(true);
+        setPlan(me.plan === "pro" ? "pro" : "free");
       } catch {
         setAuthed(false);
+        setPlan(null);
       }
     };
     check();
 
     const onAuthChanged = () => check();
     window.addEventListener("vexis-auth-changed", onAuthChanged);
-    return () => window.removeEventListener("vexis-auth-changed", onAuthChanged);
+    return () =>
+      window.removeEventListener("vexis-auth-changed", onAuthChanged);
   }, []);
 
   useEffect(() => {
@@ -49,7 +58,6 @@ export function Navbar() {
   }, []);
 
   useEffect(() => {
-    // Re-check on navigation as a backstop.
     window.dispatchEvent(new Event("vexis-auth-changed"));
   }, [pathname]);
 
@@ -83,7 +91,7 @@ export function Navbar() {
                     : pathname.startsWith(item.href);
                 return (
                   <Link
-                    key={item.href}
+                    key={`${item.href}-${item.label}`}
                     href={item.href}
                     className={[
                       "text-sm font-medium transition-colors",
@@ -107,13 +115,21 @@ export function Navbar() {
                   <div className="grid">
                     {items.map((item) => (
                       <Link
-                        key={item.href}
+                        key={`${item.href}-${item.label}-m`}
                         href={item.href}
                         className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-surface hover:text-foreground"
                       >
                         {item.label}
                       </Link>
                     ))}
+                    {authed && plan === "free" ? (
+                      <Link
+                        href="/pricing"
+                        className="rounded-lg px-3 py-2 text-sm font-semibold text-accent"
+                      >
+                        Upgrade
+                      </Link>
+                    ) : null}
                     {authed ? (
                       <button
                         type="button"
@@ -148,6 +164,15 @@ export function Navbar() {
                   </div>
                 </div>
               </details>
+
+              {authed && plan === "free" ? (
+                <Link
+                  href="/pricing"
+                  className="hidden md:inline-flex h-10 items-center justify-center rounded-full border border-accent px-4 text-sm font-semibold text-accent transition hover:bg-accent/10"
+                >
+                  Upgrade
+                </Link>
+              ) : null}
 
               {authed ? (
                 <button
@@ -187,4 +212,3 @@ export function Navbar() {
     </div>
   );
 }
-

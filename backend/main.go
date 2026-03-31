@@ -3,7 +3,10 @@ package main
 import (
 	"log"
 	"net/http"
+	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -12,17 +15,44 @@ import (
 
 	"vexis-backend/config"
 	"vexis-backend/db"
-	"vexis-backend/middleware"
 	"vexis-backend/routes"
 )
 
+// loadDotenv loads .env from the process working directory, then from the directory
+// containing main.go. That way `go run .` works from repo root or from backend/.
+func loadDotenv() {
+	_ = godotenv.Overload(".env")
+	_, self, _, ok := runtime.Caller(0)
+	if !ok {
+		return
+	}
+	backendDir := filepath.Dir(self)
+	_ = godotenv.Overload(filepath.Join(backendDir, ".env"))
+}
+
 func main() {
-	// Override any stale shell env vars in local dev.
-	_ = godotenv.Overload()
+	loadDotenv()
 
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config load failed: %v", err)
+	}
+	if cfg.EmailBypass {
+		log.Println("WARNING: EMAIL_BYPASS is on — verification and reset emails are NOT sent (only logged). Set EMAIL_BYPASS=false to use SendGrid/SMTP.")
+	}
+	if cfg.SMSBypass {
+		log.Println("WARNING: SMS_BYPASS is on — SMS is not sent via Twilio.")
+	}
+	if !cfg.EmailBypass {
+		if cfg.SendgridAPIKey != "" {
+			log.Printf("mail: SendGrid enabled (API key length=%d), FROM_EMAIL=%q", len(cfg.SendgridAPIKey), cfg.FromEmail)
+			f := strings.ToLower(cfg.FromEmail)
+			if f == "" || strings.Contains(f, "localhost") || strings.HasSuffix(f, "@example.com") {
+				log.Println("mail: WARNING — FROM_EMAIL must be a verified Single Sender or Domain in SendGrid. Fake addresses (localhost, example.com) will not deliver.")
+			}
+		} else {
+			log.Printf("mail: no SENDGRID_API_KEY — using SMTP %q port %q", cfg.SMTPHost, cfg.SMTPPort)
+		}
 	}
 
 	if cfg.GinMode != "" {
@@ -68,14 +98,8 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	routes.RegisterAuth(engine, database, cfg.JWTSecret)
+	routes.RegisterAuth(engine, database, &cfg)
 	routes.RegisterAlerts(engine, database, cfg.TradingViewWebhookURL, cfg.AlertSecret)
-
-	authed := engine.Group("/")
-	authed.Use(middleware.RequireAuth(cfg.JWTSecret, database))
-	{
-		authed.GET("/auth/me", routes.MeHandler())
-	}
 
 	port := cfg.Port
 	if port == "" {

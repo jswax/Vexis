@@ -5,24 +5,24 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"gorm.io/gorm"
-
-	"vexis-backend/models"
 )
 
 type JWTClaims struct {
-	UserID uint   `json:"user_id"`
-	Email  string `json:"email"`
+	UserID    uint   `json:"user_id"`
+	Email     string `json:"email"`
+	SessionID string `json:"sid"`
 	jwt.RegisteredClaims
 }
 
-func SignJWT(userID uint, email string, jwtSecret string) (string, error) {
+func SignJWT(userID uint, email string, sessionID string, jwtSecret string) (string, error) {
 	now := time.Now().UTC()
 	claims := JWTClaims{
-		UserID: userID,
-		Email:  email,
+		UserID:    userID,
+		Email:     email,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "user",
+			ID:        sessionID,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
 		},
@@ -43,14 +43,8 @@ func VerifyJWT(tokenString string, jwtSecret string) (JWTClaims, error) {
 	if err != nil || !parsed.Valid {
 		return JWTClaims{}, errors.New("invalid token")
 	}
+	if claims.SessionID == "" {
+		return JWTClaims{}, errors.New("invalid token")
+	}
 	return claims, nil
 }
-
-func LoadUserByID(database *gorm.DB, id uint) (models.User, error) {
-	var user models.User
-	if err := database.First(&user, id).Error; err != nil {
-		return models.User{}, err
-	}
-	return user, nil
-}
-

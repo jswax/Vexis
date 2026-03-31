@@ -6,6 +6,11 @@ import { apiFetch } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+type Me = {
+  email: string;
+  plan: string;
+};
+
 export default function DashboardPage() {
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
@@ -14,7 +19,14 @@ export default function DashboardPage() {
   useEffect(() => {
     (async () => {
       try {
-        const me = await apiFetch<{ email: string }>("/auth/me");
+        const me = await apiFetch<Me>("/auth/me");
+        if (me.plan !== "pro") {
+          router.replace(
+            "/pricing?message=" +
+              encodeURIComponent("Upgrade to Pro to access the dashboard"),
+          );
+          return;
+        }
         setEmail(me.email);
       } catch {
         router.replace("/login");
@@ -29,7 +41,7 @@ export default function DashboardPage() {
       <PageHeader
         eyebrow="DASHBOARD"
         title="Signal control center."
-        description="Placeholder shell. Auth is wired to the backend."
+        description="Pro workspace for your trading signals."
       />
       <Container>
         <div className="py-12">
@@ -69,16 +81,14 @@ export default function DashboardPage() {
                   SIDEBAR
                 </div>
                 <div className="mt-5 grid gap-2">
-                  {["Placeholder link", "Placeholder link", "Placeholder link"].map(
-                    (t, i) => (
-                      <div
-                        key={`${t}-${i}`}
-                        className="rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-muted-foreground"
-                      >
-                        {t}
-                      </div>
-                    ),
-                  )}
+                  {["Nav item", "Nav item", "Nav item"].map((t, i) => (
+                    <div
+                      key={`${t}-${i}`}
+                      className="rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-muted-foreground"
+                    >
+                      {t}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -99,7 +109,7 @@ export default function DashboardPage() {
                         className="rounded-xl border border-border bg-surface p-4"
                       >
                         <div className="text-sm text-muted-foreground">
-                          Placeholder metric
+                          Metric
                         </div>
                         <div className="mt-2 text-2xl font-semibold text-foreground">
                           —
@@ -120,7 +130,7 @@ export default function DashboardPage() {
                         className="flex items-center justify-between rounded-xl border border-border bg-surface px-4 py-3"
                       >
                         <div className="text-sm font-medium text-muted-foreground">
-                          Placeholder event
+                          Event
                         </div>
                         <div className="text-xs text-muted-foreground">—</div>
                       </div>
@@ -135,4 +145,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
