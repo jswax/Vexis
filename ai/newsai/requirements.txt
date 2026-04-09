@@ -1,0 +1,21 @@
+# QQQ News Impact MVP — install from repo: pip install -r ai/newsai/requirements.txt
+# Then: pip install -e ai/newsai
+
+numpy>=1.26
+pandas>=2.1
+requests>=2.31
+feedparser>=6.0
+python-dotenv>=1.0
+psycopg2-binary>=2.9
+sqlalchemy>=2.0
+APScheduler>=3.10
+fastapi>=0.109
+uvicorn[standard]>=0.27
+pydantic>=2.5
+pydantic-settings>=2.1
+streamlit>=1.31
+
+# Training (optional; large)
+# torch>=2.1
+# transformers>=4.36
+# accelerate>=0.26
