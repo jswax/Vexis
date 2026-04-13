@@ -4,6 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 
 import { Container } from "@/components/Container";
+import { BackgroundPaths } from "@/components/ui/background-paths";
 import { DashboardCard } from "./DashboardCard";
 
 const headline = ["The", "indicator", "that", "trades", "with", "you."];
@@ -11,7 +12,7 @@ const accentWords = new Set(["trades"]);
 
 export function Hero() {
   return (
-    <section className="min-h-[calc(100vh-64px)] bg-white">
+    <BackgroundPaths className="min-h-[calc(100vh-64px)] bg-white">
       <Container>
         <div className="grid min-h-[calc(100vh-64px)] items-center gap-12 py-16 md:grid-cols-12 md:gap-10">
           <motion.div
@@ -112,7 +113,7 @@ export function Hero() {
           </motion.div>
         </div>
       </Container>
-    </section>
+    </BackgroundPaths>
   );
 }
 

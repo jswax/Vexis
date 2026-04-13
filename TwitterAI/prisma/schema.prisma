@@ -1,0 +1,216 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TweetIngestionJobStatus {
+  CREATED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum AssetType {
+  STOCK
+  ETF
+  CRYPTO
+  INDEX
+  FX
+  COMMODITY
+  UNKNOWN
+}
+
+enum OutcomeHorizon {
+  M5
+  M15
+  H1
+  H4
+  D1
+}
+
+enum DirectionLabel {
+  BULLISH
+  BEARISH
+  NEUTRAL
+}
+
+model TweetIngestionJob {
+  id              String                 @id @default(cuid())
+  source          String
+  provider        String
+  status          TweetIngestionJobStatus
+  actorId         String
+  apifyRunId      String?
+  queryConfigJson Json
+  itemsRequested  Int?
+  itemsReceived   Int?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  errorMessage    String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([status, createdAt])
+  @@index([apifyRunId])
+}
+
+model TwitterAuthor {
+  id             String   @id @default(cuid())
+  externalId     String   @unique
+  username       String
+  displayName    String
+  verified       Boolean
+  followersCount Int?
+  followingCount Int?
+  favouritesCount Int?
+  statusesCount  Int?
+  rawJson        Json
+  tweets         Tweet[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([username])
+}
+
+model Tweet {
+  id               String  @id @default(cuid())
+  externalId        String  @unique
+  url               String
+  text              String
+  rawJson           Json
+  language          String?
+  createdAtTwitter  DateTime
+  scrapedAt         DateTime @default(now())
+  sourceQuery       String?
+  sourceQueryType   String?
+  matchedSearchTerm String?
+  likeCount         Int?
+  retweetCount      Int?
+  replyCount        Int?
+  quoteCount        Int?
+  bookmarkCount     Int?
+  viewCount         Int?
+  isReply           Boolean
+  isRetweet         Boolean
+  isQuote           Boolean
+  hasImages         Boolean
+  hasVideo          Boolean
+
+  authorId          String
+  author            TwitterAuthor @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  assetMatches      TweetAssetMatch[]
+  marketSnapshots   MarketSnapshot[]
+  outcomes          TweetOutcome[]
+  features          TweetFeatures?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([createdAtTwitter])
+  @@index([authorId, createdAtTwitter])
+}
+
+model TweetAssetMatch {
+  id         String    @id @default(cuid())
+  tweetId    String
+  assetType  AssetType
+  ticker     String
+  confidence Float
+  matchMethod String
+  createdAt  DateTime  @default(now())
+
+  tweet      Tweet @relation(fields: [tweetId], references: [id], onDelete: Cascade)
+
+  @@index([tweetId])
+  @@index([ticker])
+  @@unique([tweetId, ticker, matchMethod])
+}
+
+model MarketSnapshot {
+  id                String    @id @default(cuid())
+  tweetId            String
+  ticker             String
+  assetType          AssetType
+  timestamp          DateTime
+  price              Float
+  volume             Float?
+  vwap               Float?
+  rsi                Float?
+  macd               Float?
+  atr                Float?
+  realizedVolatility Float?
+  benchmarkTicker    String?
+  benchmarkPrice     Float?
+  marketOpenFlag     Boolean
+  sessionType        String?
+  rawJson            Json
+  createdAt          DateTime  @default(now())
+
+  tweet              Tweet @relation(fields: [tweetId], references: [id], onDelete: Cascade)
+
+  @@index([tweetId])
+  @@index([ticker])
+  @@unique([tweetId, ticker])
+}
+
+model TweetOutcome {
+  id                String        @id @default(cuid())
+  tweetId            String
+  ticker             String
+  horizon            OutcomeHorizon
+  priceAtTweet       Float
+  priceAtHorizon     Float
+  rawReturn          Float
+  benchmarkReturn    Float?
+  excessReturn       Float?
+  expectedVolatility Float?
+  volAdjustedReturn  Float?
+  impactScore        Int
+  directionLabel     DirectionLabel
+  createdAt          DateTime      @default(now())
+
+  tweet              Tweet @relation(fields: [tweetId], references: [id], onDelete: Cascade)
+
+  @@index([tweetId])
+  @@index([ticker])
+  @@index([horizon])
+  @@index([directionLabel])
+  @@unique([tweetId, ticker, horizon])
+}
+
+model TweetFeatures {
+  id               String   @id @default(cuid())
+  tweetId           String   @unique
+  sentimentScore    Float?
+  credibilityScore  Float?
+  spamScore         Float?
+  duplicateGroupId  String?
+  embeddingModel    String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tweet             Tweet @relation(fields: [tweetId], references: [id], onDelete: Cascade)
+
+  @@index([duplicateGroupId])
+}
+
+model AssetAlias {
+  id         String    @id @default(cuid())
+  assetType  AssetType
+  ticker     String
+  alias      String
+  matchMethod String
+  confidence Float
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([ticker])
+  @@index([alias])
+  @@unique([assetType, alias])
+}
+

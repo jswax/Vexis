@@ -1,0 +1,30 @@
+{
+  "searchTerms": [
+    "(\"rate cut\" OR FOMC OR CPI OR inflation OR NFP) lang:en -filter:replies",
+    "($SPY OR SPY OR $QQQ OR QQQ OR VIX OR $VIX) lang:en -filter:replies",
+    "($NVDA OR Nvidia OR $TSLA OR Tesla OR $AAPL OR Apple) lang:en -filter:replies",
+    "($BTC OR Bitcoin OR \"bitcoin ETF\" OR $ETH OR Ethereum) lang:en -filter:replies",
+    "(earnings OR guidance OR downgrade OR upgrade) lang:en -filter:replies"
+  ],
+  "twitterHandles": [
+    "Reuters",
+    "Bloomberg",
+    "WSJ",
+    "business",
+    "DeItaone",
+    "FirstSquawk",
+    "financialjuice"
+  ],
+  "startUrls": [],
+  "conversationIds": [],
+  "maxItems": 150,
+  "sort": "Latest",
+  "tweetLanguage": "en",
+  "includeSearchTerms": true,
+  "minimumRetweets": 2,
+  "minimumFavorites": 5,
+  "minimumReplies": 0,
+  "onlyVerifiedUsers": true,
+  "onlyTwitterBlue": false
+}
+
