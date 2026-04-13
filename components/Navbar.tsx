@@ -25,6 +25,7 @@ export function Navbar() {
     if (authed) {
       base.push({ href: "/profile", label: "Profile" });
       base.push({ href: "/dashboard", label: "Dashboard" });
+      base.push({ href: "/twitter", label: "Twitter AI" });
     }
     return base;
   }, [authed]);

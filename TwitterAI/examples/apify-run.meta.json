@@ -1,0 +1,91 @@
+{
+  "id": "KTqbqeWoZCV7CmtZU",
+  "actId": "61RPP7dywgiy0JPD0",
+  "userId": "R9Q21GaBXP5Fjf8ab",
+  "startedAt": "2026-03-31T22:54:00.591Z",
+  "finishedAt": "2026-03-31T22:54:03.693Z",
+  "status": "SUCCEEDED",
+  "statusMessage": "\n\nYour run has finished.\nPlease subscribe to a paid plan on Apify for the best experience.\nLink: https://apify.com/pricing?fpr=yhdrb\n",
+  "isStatusMessageTerminal": null,
+  "meta": {
+    "origin": "API",
+    "userAgent": "ApifyClient/2.22.3 (Windows_NT; Node/v22.14.0); isAtHome/false"
+  },
+  "stats": {
+    "inputBodyLen": 301,
+    "migrationCount": 0,
+    "rebootCount": 0,
+    "restartCount": 0,
+    "durationMillis": 2960,
+    "resurrectCount": 0,
+    "runTimeSecs": 2.96,
+    "metamorph": 0,
+    "computeUnits": 0.00020555555555555556,
+    "memAvgBytes": 14121092.868008949,
+    "memMaxBytes": 70479872,
+    "memCurrentBytes": 70479872,
+    "cpuAvgUsage": -2.700288213787414,
+    "cpuMaxUsage": 109.7298937784522,
+    "cpuCurrentUsage": 109.7298937784522,
+    "netRxBytes": 992,
+    "netTxBytes": 288
+  },
+  "options": {
+    "build": "latest",
+    "timeoutSecs": 0,
+    "memoryMbytes": 256,
+    "maxTotalChargeUsd": 3.799993,
+    "maxItems": 94,
+    "diskMbytes": 512
+  },
+  "buildId": "YhrWDCyBFQ5fjTz1b",
+  "exitCode": 0,
+  "defaultKeyValueStoreId": "pnBH8p3CJXQFGfdDq",
+  "defaultDatasetId": "j03drckvwXXeRxdqr",
+  "defaultRequestQueueId": "KC9524HTtdyrlgJgE",
+  "storageIds": {
+    "keyValueStores": {
+      "default": "pnBH8p3CJXQFGfdDq"
+    },
+    "datasets": {
+      "default": "j03drckvwXXeRxdqr"
+    },
+    "requestQueues": {
+      "default": "KC9524HTtdyrlgJgE"
+    }
+  },
+  "pricingInfo": {
+    "pricingModel": "PAY_PER_EVENT",
+    "createdAt": "2026-02-16T15:05:29.273Z",
+    "startedAt": "2026-02-16T15:05:29.273Z",
+    "apifyMarginPercentage": 0.2,
+    "isPriceChangeNotificationSuppressed": true,
+    "reasonForChange": "Migration from Pay Per Result to Pay Per Event with apify-default-dataset-item event",
+    "forceContainsSignificantPriceChange": false,
+    "pricingPerEvent": {
+      "actorChargeEvents": {
+        "apify-default-dataset-item": {
+          "eventTitle": "tweet",
+          "eventDescription": "Single tweet in the default dataset.",
+          "isPrimaryEvent": true,
+          "eventPriceUsd": 0.04
+        }
+      }
+    }
+  },
+  "chargedEventCounts": {
+    "apify-default-dataset-item": 0
+  },
+  "platformUsageBillingModel": "DEVELOPER",
+  "accountedChargedEventCounts": {
+    "apify-default-dataset-item": 0
+  },
+  "generalAccess": "FOLLOW_USER_SETTING",
+  "buildNumber": "0.0.1319",
+  "containerUrl": "https://tn2zpw6trqzr.runs.apify.net",
+  "usageTotalUsd": 0,
+  "consoleUrl": "https://console.apify.com/view/runs/KTqbqeWoZCV7CmtZU",
+  "output": {
+    "overview": "https://api.apify.com/v2/datasets/j03drckvwXXeRxdqr/items"
+  }
+}
