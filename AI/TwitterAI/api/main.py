@@ -72,6 +72,11 @@ def ingest(req: IngestRequest) -> dict:
         search_terms = DEFAULT_QQQ_SEARCH_TERMS
         twitter_handles = DEFAULT_QQQ_HANDLES
 
+    log(
+        f"[{__name__}] ingest start (max_items={req.max_items}, "
+        f"terms={len(search_terms)}, handles={len(twitter_handles)}, convs={len(req.conversation_ids)})"
+    )
+
     q = IngestQuery(
         search_terms=search_terms,
         twitter_handles=twitter_handles,
@@ -93,6 +98,11 @@ def ingest(req: IngestRequest) -> dict:
             source_label=req.source_label or "qqq:api:/api/twitter/ingest",
         )
         session.commit()
+    log(
+        f"[{__name__}] ingest done (items_received={result.items_received}, "
+        f"items_normalized={result.items_normalized}, tweets_upserted={result.tweets_upserted}, "
+        f"asset_matches_created={result.asset_matches_created})"
+    )
     return {
         "job_id": result.job_id,
         "items_received": result.items_received,
@@ -109,13 +119,14 @@ def ingest(req: IngestRequest) -> dict:
 
 class OutcomeRequest(BaseModel):
     limit: int = Field(default=50, ge=1, le=500)
+    qqq_only: bool = True
 
 
 @app.post("/api/twitter/compute-outcomes")
 def compute_outcomes(req: OutcomeRequest) -> dict:
     log(f"[{__name__}] compute-outcomes start (limit={req.limit})")
     with Session() as session:
-        result = compute_for_unprocessed(session, limit=req.limit)
+        result = compute_for_unprocessed(session, limit=req.limit, qqq_only=req.qqq_only)
         session.commit()
     log(f"[{__name__}] compute-outcomes done (created_outcomes={result.created_outcomes}, errors={result.errors})")
     return {
@@ -125,6 +136,7 @@ def compute_outcomes(req: OutcomeRequest) -> dict:
         "created_outcomes": result.created_outcomes,
         "skipped_no_asset": result.skipped_no_asset,
         "errors": result.errors,
+        "qqq_only": req.qqq_only,
     }
 
 
@@ -150,7 +162,6 @@ def list_tweets(
     offset: int = 0,
     ticker: str | None = None,
     qqq: bool = False,
-    allowlist_only: bool = False,
 ) -> dict[str, Any]:
     from sqlalchemy import select
     from db.models import TweetAssetMatch, TweetFeatures, TweetOutcome, TwitterAuthor
@@ -206,8 +217,6 @@ def list_tweets(
             )
             user_norm = (author.username or "").lstrip("@").strip().lower() if author else ""
             is_allowlisted = bool(user_norm and user_norm in SOURCE_WEIGHTS)
-            if allowlist_only and not is_allowlisted:
-                continue
 
             rows.append({
                 "id": tweet.id,
@@ -257,9 +266,7 @@ def list_tweets(
 
     if qqq:
         rows.sort(key=lambda r: (r.get("qqq") or {}).get("score", 0.0), reverse=True)
-        # In QQQ mode, drop obvious spam/finfluencer content even if it contains tickers.
-        rows = [r for r in rows if (r.get("qqq") or {}).get("score", 0.0) >= 0.6]
-    return {"tweets": rows, "count": len(rows), "offset": offset, "qqq_mode": qqq, "allowlist_only": allowlist_only}
+    return {"tweets": rows, "count": len(rows), "offset": offset, "qqq_mode": qqq}
 
 
 # ── Tweet lookup ─────────────────────────────────────────────────────────────

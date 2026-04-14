@@ -26,6 +26,7 @@ from pipeline.labeling import (
 )
 from prices.alpaca_bars import get_prices_for_timestamps
 from log_buffer import log, ts
+from pipeline.qqq_signal import QQQ_CORE_TICKERS
 
 
 @dataclass
@@ -42,7 +43,7 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
-def compute_for_unprocessed(session: Session, limit: int = 50) -> OutcomeResult:
+def compute_for_unprocessed(session: Session, limit: int = 50, *, qqq_only: bool = True) -> OutcomeResult:
     # Tweets that have asset matches but zero outcomes
     subq_matches = select(TweetAssetMatch.tweet_id).correlate(Tweet)
     subq_outcomes = select(TweetOutcome.tweet_id).correlate(Tweet)
@@ -81,6 +82,17 @@ def compute_for_unprocessed(session: Session, limit: int = 50) -> OutcomeResult:
         if not matches:
             skipped_no_asset += 1
             continue
+
+        if qqq_only:
+            matches = [
+                m
+                for m in matches
+                if (m.ticker or "").upper() in QQQ_CORE_TICKERS
+                or (m.ticker or "").upper() in ("QQQ", "NDX")
+            ]
+            if not matches:
+                skipped_no_asset += 1
+                continue
 
         for match in matches:
             ticker = match.ticker

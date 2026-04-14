@@ -450,7 +450,6 @@ function FeedSection() {
   const [ticker, setTicker] = useState("");
   const [tickerFilter, setTickerFilter] = useState("");
   const [qqqMode, setQqqMode] = useState(true);
-  const [allowlistOnly, setAllowlistOnly] = useState(true);
   const LIMIT = 20;
 
   const load = useCallback(
@@ -462,7 +461,6 @@ function FeedSection() {
         const params = new URLSearchParams({ limit: String(LIMIT), offset: String(nextOffset) });
         if (tickerFilter) params.set("ticker", tickerFilter);
         if (qqqMode) params.set("qqq", "1");
-        if (allowlistOnly) params.set("allowlist_only", "1");
         const res = await fetch(`/api/twitterai/tweets?${params.toString()}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
@@ -476,7 +474,7 @@ function FeedSection() {
         setLoading(false);
       }
     },
-    [offset, tickerFilter, qqqMode, allowlistOnly]
+    [offset, tickerFilter, qqqMode]
   );
 
   const initialLoad = useRef(false);
@@ -497,7 +495,6 @@ function FeedSection() {
     const params = new URLSearchParams({ limit: String(LIMIT), offset: "0" });
     if (ticker.trim()) params.set("ticker", ticker.toUpperCase().trim());
     if (qqqMode) params.set("qqq", "1");
-    if (allowlistOnly) params.set("allowlist_only", "1");
     fetch(`/api/twitterai/tweets?${params.toString()}`)
       .then((r) => r.json())
       .then((data) => {
@@ -540,23 +537,6 @@ function FeedSection() {
             className="h-4 w-4 rounded border-border"
           />
           QQQ mode
-        </label>
-
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={allowlistOnly}
-            onChange={(e) => {
-              setAllowlistOnly(e.target.checked);
-              setOffset(0);
-              setTweets([]);
-              setHasMore(true);
-              setTimeout(() => load(true), 0);
-            }}
-            className="h-4 w-4 rounded border-border"
-            disabled={!qqqMode}
-          />
-          Allowlist only
         </label>
         {tickerFilter && (
           <button
@@ -945,7 +925,7 @@ function ComputeOutcomesSection() {
       pollRef.current = window.setInterval(() => {
         fetchLogs().catch(() => null);
       }, 1200);
-      const data = await post("/api/twitterai/compute-outcomes", { limit: parseInt(limit, 10) || 50 });
+      const data = await post("/api/twitterai/compute-outcomes", { limit: parseInt(limit, 10) || 50, qqq_only: true });
       setResult(data);
     } catch (err) {
       setError(String(err));

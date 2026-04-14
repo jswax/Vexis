@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
+from bisect import bisect_left
 
 import requests
 
@@ -252,6 +253,16 @@ def get_prices_for_timestamps(
     start_t = min(ts_utc) - timedelta(seconds=pad_seconds)
     end_t = max(ts_utc) + timedelta(seconds=pad_seconds)
 
+    def _pick_index_ceiling(sorted_ts: list[datetime], target: datetime) -> int:
+        """
+        Prefer first bar at/after target (ceiling). If target is beyond the last bar,
+        fall back to the last bar.
+        """
+        j = bisect_left(sorted_ts, target)
+        if j >= len(sorted_ts):
+            return len(sorted_ts) - 1
+        return j
+
     if asset_type == "CRYPTO":
         symbol = _normalize_crypto(ticker)
         bars = _get_crypto_bars(symbol, start_t, end_t)
@@ -263,7 +274,8 @@ def get_prices_for_timestamps(
 
         out: dict[datetime, PricePoint] = {}
         for target in ts_utc:
-            idx = min(range(len(bars)), key=lambda i: _abs_delta_s(bar_ts[i], target))
+            # Crypto is 24/7; use ceiling to make horizons monotonic, fall back safely.
+            idx = _pick_index_ceiling(bar_ts, target)
             best = bars[idx]
             rv = _realized_vol(bars[max(0, idx - 60) : idx + 1])
             ts = bar_ts[idx]
@@ -300,7 +312,9 @@ def get_prices_for_timestamps(
 
     out: dict[datetime, PricePoint] = {}
     for target in ts_utc:
-        idx = min(range(len(bars)), key=lambda i: _abs_delta_s(bar_ts[i], target))
+        # Stocks/ETFs: prefer bar at/after the target time so M5/M15/etc
+        # don't collapse to the same "nearest" bar during illiquid/off-hours.
+        idx = _pick_index_ceiling(bar_ts, target)
         best = bars[idx]
         ts = bar_ts[idx]
         market_open_flag, session_type = _infer_session(ts)

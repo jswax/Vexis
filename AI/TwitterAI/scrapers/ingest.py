@@ -24,7 +24,6 @@ from db.models import (
 from pipeline.asset_matching import extract_tickers
 from pipeline.deduper import exact_text_hash, near_dup_hash
 from pipeline.feature_scoring import compute_feature_scores
-from pipeline.qqq_ingest_profile import should_keep_qqq_tweet
 from scrapers.normalizer import normalize
 from scrapers.twitterapiio import IngestQuery, RunResult, run_ingest
 
@@ -109,39 +108,6 @@ def run(
             seen_text_hashes.add(text_hash)
 
             items_normalized += 1
-
-            # Compute feature scores early (so we can filter before writing to DB)
-            scores = compute_feature_scores(
-                text=bundle.tweet.text,
-                like_count=bundle.tweet.like_count,
-                retweet_count=bundle.tweet.retweet_count,
-                reply_count=bundle.tweet.reply_count,
-                is_retweet=bundle.tweet.is_retweet,
-                is_reply=bundle.tweet.is_reply,
-                has_images=bundle.tweet.has_images,
-                has_video=bundle.tweet.has_video,
-                verified=bundle.author.verified,
-                followers_count=bundle.author.followers_count,
-                following_count=bundle.author.following_count,
-                statuses_count=bundle.author.statuses_count,
-            )
-
-            # QQQ-mode filtering: if the query is "QQQ-ish", aggressively filter spam/noise.
-            # (Keeps allowlisted sources; blocks obvious bait.)
-            if (
-                source_label
-                and "qqq" in source_label.lower()
-            ) or any("qqq" in (t or "").lower() for t in query.search_terms):
-                decision = should_keep_qqq_tweet(
-                    text=bundle.tweet.text,
-                    username=bundle.author.username,
-                    verified=bundle.author.verified,
-                    followers_count=bundle.author.followers_count,
-                    spam_score=scores.get("spam_score"),
-                    credibility_score=scores.get("credibility_score"),
-                )
-                if not decision.keep:
-                    continue
 
             # Upsert author
             stmt = (
@@ -246,6 +212,20 @@ def run(
                 asset_matches_created += result.rowcount
 
             # Features
+            scores = compute_feature_scores(
+                text=bundle.tweet.text,
+                like_count=bundle.tweet.like_count,
+                retweet_count=bundle.tweet.retweet_count,
+                reply_count=bundle.tweet.reply_count,
+                is_retweet=bundle.tweet.is_retweet,
+                is_reply=bundle.tweet.is_reply,
+                has_images=bundle.tweet.has_images,
+                has_video=bundle.tweet.has_video,
+                verified=bundle.author.verified,
+                followers_count=bundle.author.followers_count,
+                following_count=bundle.author.following_count,
+                statuses_count=bundle.author.statuses_count,
+            )
             feat_stmt = (
                 pg_insert(TweetFeatures)
                 .values(
