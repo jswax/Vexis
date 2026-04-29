@@ -12,8 +12,10 @@ from config import get_settings
 HORIZONS: list[dict] = [
     {"horizon": "M5",  "seconds": 5 * 60},
     {"horizon": "M15", "seconds": 15 * 60},
+    {"horizon": "M30", "seconds": 30 * 60},
     {"horizon": "H1",  "seconds": 60 * 60},
     {"horizon": "H4",  "seconds": 4 * 60 * 60},
+    {"horizon": "H6",  "seconds": 6 * 60 * 60},
     {"horizon": "D1",  "seconds": 24 * 60 * 60},
 ]
 
@@ -53,14 +55,40 @@ def compute_vol_adjusted_return(
         return None
     if expected_volatility is None or not math.isfinite(expected_volatility) or expected_volatility <= 0:
         return excess_return
-    return excess_return / expected_volatility
+    settings = get_settings()
+    denom = max(float(expected_volatility), float(settings.impact_vol_floor))
+    return excess_return / denom
 
 
-def compute_impact_score(vol_adjusted_return: float | None) -> int:
+def scale_expected_volatility_for_horizon(
+    expected_volatility: float | None,
+    *,
+    horizon_seconds: int,
+    bar_seconds: int = 60,
+) -> float | None:
+    """
+    Convert a per-bar (default: 1-minute) volatility estimate into a horizon-scaled
+    estimate using sqrt(time) scaling.
+    """
+    if expected_volatility is None or not math.isfinite(expected_volatility) or expected_volatility <= 0:
+        return None
+    n = max(1.0, float(horizon_seconds) / float(bar_seconds))
+    return float(expected_volatility) * math.sqrt(n)
+
+
+def compute_impact_score(
+    vol_adjusted_return: float | None,
+    *,
+    market_open_flag: bool | None = None,
+    session_type: str | None = None,
+) -> int:
     settings = get_settings()
     if vol_adjusted_return is None or not math.isfinite(vol_adjusted_return):
         return 0
     scaled = vol_adjusted_return * settings.impact_score_multiplier
+    # Make it harder to score extremely high off-hours.
+    if market_open_flag is False or (session_type is not None and session_type != "regular"):
+        scaled *= settings.off_hours_impact_multiplier
     rounded = round(scaled)
     return max(-10, min(10, rounded))
 

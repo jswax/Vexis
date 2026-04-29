@@ -53,7 +53,7 @@ def should_keep_qqq_tweet(
     allowlisted = user in SOURCE_WEIGHTS
 
     # Hard text noise blocks first
-    for pat, w in NOISE_PATTERNS:
+    for pat, w, _noise_explain in NOISE_PATTERNS:
         if w < 0 and re.search(pat, text, flags=re.IGNORECASE):
             reasons.append(f"noise:{pat}")
             return FilterDecision(keep=False, reasons=reasons)

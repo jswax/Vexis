@@ -9,11 +9,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import requests
+from requests import Response
 
 from config import get_settings
 
 BASE_URL = "https://api.twitterapi.io"
-FREE_TIER_DELAY_S = 5.1  # free tier: 1 req / 5s
+MAX_RETRIES = 3
+
+
+def _request_delay_s() -> float:
+    d = float(get_settings().twitter_api_io_request_delay_s)
+    return max(0.0, d)
 
 
 @dataclass
@@ -71,13 +77,41 @@ def _search_page(
     params: dict[str, str] = {"query": query, "queryType": query_type}
     if cursor:
         params["cursor"] = cursor
-    resp = session.get(
-        f"{BASE_URL}/twitter/tweet/advanced_search",
-        params=params,
-        headers={"X-API-Key": api_key},
-        timeout=30,
-    )
-    resp.raise_for_status()
+    url = f"{BASE_URL}/twitter/tweet/advanced_search"
+
+    def _do() -> Response:
+        return session.get(
+            url,
+            params=params,
+            headers={"X-API-Key": api_key},
+            timeout=30,
+        )
+
+    last_exc: Exception | None = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = _do()
+            # Retry on 429/5xx (transient); raise on other 4xx.
+            if resp.status_code == 429 or resp.status_code >= 500:
+                raise requests.HTTPError(
+                    f"twitterapi.io transient HTTP {resp.status_code}",
+                    response=resp,
+                )
+            resp.raise_for_status()
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= MAX_RETRIES:
+                raise
+            backoff = min(8.0, 0.75 * (2 ** (attempt - 1)))
+            print(
+                f"[{_ts()}] twitterapi.io: retry {attempt}/{MAX_RETRIES} in {backoff:.1f}s ({type(exc).__name__})",
+                flush=True,
+            )
+            time.sleep(backoff)
+    else:  # pragma: no cover
+        raise last_exc  # type: ignore[misc]
+
     data = resp.json()
     tweets = data.get("tweets") or []
     has_next = bool(data.get("has_next_page"))
@@ -95,9 +129,10 @@ def _collect_search(
     collected: list[dict[str, Any]] = []
     cursor = ""
     first = True
+    delay = _request_delay_s()
     while len(collected) < limit:
-        if not first:
-            time.sleep(FREE_TIER_DELAY_S)
+        if not first and delay > 0:
+            time.sleep(delay)
         first = False
         tweets, has_next, cursor = _search_page(query, query_type, cursor, api_key, session)
         collected.extend(tweets)
@@ -132,10 +167,12 @@ def run_ingest(q: IngestQuery, session: requests.Session | None = None) -> RunRe
 
     query_count = 0
 
+    delay = _request_delay_s()
+
     def run_query(built_q: str, qt: str) -> None:
         nonlocal query_count
-        if query_count > 0:
-            time.sleep(FREE_TIER_DELAY_S)
+        if query_count > 0 and delay > 0:
+            time.sleep(delay)
         query_count += 1
         all_queries.append(built_q)
         print(f"[{_ts()}] twitterapi.io: searching ({qt}) {built_q}", flush=True)

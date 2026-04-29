@@ -21,15 +21,27 @@ class Settings(BaseSettings):
     # Database
     database_url: str = Field(validation_alias="DATABASE_URL")
 
+    # API protection (optional)
+    # When set, POST endpoints that mutate state require header `x-twitterai-token`.
+    twitterai_token: str = Field(default="", validation_alias="TWITTERAI_TOKEN")
+
     # twitterapi.io
     twitter_api_io_key: str = Field(default="", validation_alias="TWITTER_API_IO_KEY")
+    # Seconds between advanced_search requests (pagination + multi-query). Default 5.1 ~ free-tier 1 req/5s.
+    # Set to 0 on a paid plan that allows faster pacing (watch for 429s).
+    twitter_api_io_request_delay_s: float = Field(
+        default=5.1,
+        validation_alias="TWITTER_API_IO_REQUEST_DELAY_S",
+    )
+    # When false, ingest skips loading the ML model and writing tweet_predictions (faster; run backfill later).
+    ingest_predictions: bool = Field(default=True, validation_alias="TWITTERAI_INGEST_PREDICTIONS")
 
     # Alpaca
     market_data_provider: str = Field(default="none", validation_alias="MARKET_DATA_PROVIDER")
     alpaca_api_key: str = Field(default="", validation_alias="ALPACA_API_KEY")
     alpaca_api_secret: str = Field(default="", validation_alias="ALPACA_API_SECRET")
     alpaca_stock_feed: Literal["iex", "sip", "otc", "boats"] = Field(
-        default="iex", validation_alias="ALPACA_STOCK_FEED"
+        default="sip", validation_alias="ALPACA_STOCK_FEED"
     )
     alpaca_crypto_loc: Literal["us", "us-1", "us-2", "eu-1", "bs-1"] = Field(
         default="us", validation_alias="ALPACA_CRYPTO_LOC"
@@ -45,6 +57,27 @@ class Settings(BaseSettings):
     # Scoring
     impact_score_multiplier: float = Field(
         default=2.5, validation_alias="IMPACT_SCORE_MULTIPLIER"
+    )
+    impact_vol_floor: float = Field(
+        default=0.001, validation_alias="IMPACT_VOL_FLOOR"
+    )
+    off_hours_impact_multiplier: float = Field(
+        default=0.5, validation_alias="OFF_HOURS_IMPACT_MULTIPLIER"
+    )
+
+    # Ticker extraction / ingest quality
+    match_max_tickers_per_tweet: int = Field(
+        default=12, validation_alias="MATCH_MAX_TICKERS_PER_TWEET"
+    )
+    match_holdings_min_tickers: int = Field(
+        default=10, validation_alias="MATCH_HOLDINGS_MIN_TICKERS"
+    )
+    match_holdings_min_cashtags: int = Field(
+        default=8, validation_alias="MATCH_HOLDINGS_MIN_CASHTAGS"
+    )
+    match_holdings_keep_tickers: str = Field(
+        default="QQQ,QQQM,SPY",
+        validation_alias="MATCH_HOLDINGS_KEEP_TICKERS",
     )
 
     @model_validator(mode="after")

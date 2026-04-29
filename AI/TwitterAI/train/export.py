@@ -8,6 +8,8 @@ import csv
 import json
 import sys
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -39,27 +41,41 @@ class TrainingRow:
     duplicate_group_id: str | None
 
 
-def build_rows(session: Session, limit: int = 5000) -> list[TrainingRow]:
-    outcomes = (
-        session.execute(
-            select(TweetOutcome)
-            .order_by(TweetOutcome.created_at.desc())
-            .limit(limit)
-        )
-        .scalars()
-        .all()
-    )
+def build_rows(session: Session, limit: int | None = 5000) -> list[TrainingRow]:
+    stmt = select(TweetOutcome).order_by(TweetOutcome.created_at.desc())
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    outcomes = session.execute(stmt).scalars().all()
+    if not outcomes:
+        return []
+
+    tweet_ids = list({o.tweet_id for o in outcomes})
+    tweets = {
+        t.id: t
+        for t in session.execute(select(Tweet).where(Tweet.id.in_(tweet_ids))).scalars().all()
+    }
+    author_ids = list({t.author_id for t in tweets.values()})
+    authors: dict[str, TwitterAuthor] = {}
+    if author_ids:
+        authors = {
+            a.id: a
+            for a in session.execute(
+                select(TwitterAuthor).where(TwitterAuthor.id.in_(author_ids))
+            ).scalars().all()
+        }
+    features_by_tweet: dict[str, TweetFeatures] = {}
+    for f in session.execute(
+        select(TweetFeatures).where(TweetFeatures.tweet_id.in_(tweet_ids))
+    ).scalars().all():
+        features_by_tweet[f.tweet_id] = f
 
     rows: list[TrainingRow] = []
     for o in outcomes:
-        tweet = session.get(Tweet, o.tweet_id)
+        tweet = tweets.get(o.tweet_id)
         if not tweet:
             continue
-        author = session.get(TwitterAuthor, tweet.author_id)
-        features = session.execute(
-            select(TweetFeatures).where(TweetFeatures.tweet_id == tweet.id)
-        ).scalar_one_or_none()
-
+        author = authors.get(tweet.author_id)
+        features = features_by_tweet.get(tweet.id)
         rows.append(
             TrainingRow(
                 tweet_id=tweet.id,
@@ -104,6 +120,35 @@ def _apply_filters(rows: list[TrainingRow], filters: dict[str, Any]) -> list[Tra
                 continue
         out.append(r)
     return out
+
+
+def export_snapshot_json(
+    rows: list[TrainingRow],
+    out_file: str,
+    *,
+    meta: dict[str, Any] | None = None,
+    compact: bool = False,
+) -> int:
+    """
+    Single JSON file: { "meta": {...}, "rows": [ {TrainingRow as dict}, ... ] }.
+    Same row schema as JSONL export; no filters applied (callers filter first if needed).
+    Use compact=True for large datasets (faster write, smaller file; still valid JSON).
+    """
+    Path(out_file).parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "meta": {
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "row_count": len(rows),
+            **(meta or {}),
+        },
+        "rows": [asdict(r) for r in rows],
+    }
+    with open(out_file, "w", encoding="utf-8") as f:
+        if compact:
+            json.dump(payload, f, ensure_ascii=False, separators=(",", ":"), default=str)
+        else:
+            json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+    return len(rows)
 
 
 def export_jsonl(

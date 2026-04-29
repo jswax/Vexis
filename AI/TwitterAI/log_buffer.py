@@ -16,7 +16,12 @@ def log(line: str) -> None:
     msg = line.rstrip("\n")
     with _lock:
         _buf.append(msg)
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        # Some Windows terminals default to cp1252 and can't print certain unicode
+        safe = msg.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+        print(safe, flush=True)
 
 
 def logf(fmt: str, *args: object) -> None:

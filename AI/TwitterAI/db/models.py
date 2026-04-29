@@ -25,7 +25,7 @@ class Base(DeclarativeBase):
 
 
 AssetType = Literal["STOCK", "ETF", "CRYPTO", "INDEX", "FX", "COMMODITY", "UNKNOWN"]
-OutcomeHorizon = Literal["M5", "M15", "H1", "H4", "D1"]
+OutcomeHorizon = Literal["M5", "M15", "M30", "H1", "H4", "H6", "D1"]
 DirectionLabel = Literal["BULLISH", "BEARISH", "NEUTRAL"]
 JobStatus = Literal["CREATED", "RUNNING", "SUCCEEDED", "FAILED"]
 
@@ -194,7 +194,7 @@ class TweetOutcome(Base):
     )
     ticker: Mapped[str] = mapped_column(Text, nullable=False)
     horizon: Mapped[str] = mapped_column(
-        Enum("M5", "M15", "H1", "H4", "D1", name="outcome_horizon"), nullable=False
+        Enum("M5", "M15", "M30", "H1", "H4", "H6", "D1", name="outcome_horizon"), nullable=False
     )
     price_at_tweet: Mapped[float] = mapped_column(Float, nullable=False)
     price_at_horizon: Mapped[float] = mapped_column(Float, nullable=False)
@@ -226,6 +226,10 @@ class TweetFeatures(Base):
     spam_score: Mapped[Optional[float]] = mapped_column(Float)
     duplicate_group_id: Mapped[Optional[str]] = mapped_column(Text)
     embedding_model: Mapped[Optional[str]] = mapped_column(Text)
+    # Model prediction summary (D1 horizon — quick lookup without joining tweet_predictions)
+    model_direction_pred: Mapped[Optional[str]] = mapped_column(Text)
+    model_direction_conf: Mapped[Optional[float]] = mapped_column(Float)
+    model_version: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -257,3 +261,33 @@ class AssetAlias(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class TweetPrediction(Base):
+    """Per-horizon model predictions stored at ingest time."""
+
+    __tablename__ = "tweet_predictions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tweet_id", "ticker", "horizon", "model_version",
+            name="uq_tweet_prediction",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    tweet_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tweets.id", ondelete="CASCADE"), nullable=False
+    )
+    ticker: Mapped[str] = mapped_column(Text, nullable=False)
+    horizon: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[str] = mapped_column(Text, nullable=False)
+    direction_pred: Mapped[str] = mapped_column(Text, nullable=False)
+    bullish_prob: Mapped[float] = mapped_column(Float, nullable=False)
+    bearish_prob: Mapped[float] = mapped_column(Float, nullable=False)
+    neutral_prob: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    tweet: Mapped["Tweet"] = relationship("Tweet", foreign_keys=[tweet_id])

@@ -146,14 +146,16 @@ function HealthBadge() {
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
-type Tab = "feed" | "ingest" | "compute" | "export";
+type Tab = "feed" | "status" | "ingest" | "compute" | "export" | "model";
 
 function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string }[] = [
     { id: "feed", label: "Feed" },
+    { id: "status", label: "Status" },
     { id: "ingest", label: "Ingest" },
     { id: "compute", label: "Compute" },
     { id: "export", label: "Export" },
+    { id: "model", label: "Model" },
   ];
   return (
     <div className="flex gap-1 rounded-xl border border-border bg-surface p-1">
@@ -218,11 +220,22 @@ type TweetOutcomeSummary = {
   raw_return: number | null;
   excess_return: number | null;
 };
+type TweetPredictionSummary = {
+  ticker: string;
+  horizon: string;
+  direction_pred: string;
+  confidence: number;
+  bullish_prob: number;
+  bearish_prob: number;
+  neutral_prob: number;
+  model_version: string;
+};
 type TweetRow = {
   id: string;
   text: string;
   url: string;
   created_at_twitter: string | null;
+  is_in_sample?: boolean;
   like_count: number | null;
   retweet_count: number | null;
   reply_count: number | null;
@@ -236,13 +249,53 @@ type TweetRow = {
   } | null;
   asset_matches: AssetMatch[];
   outcomes: TweetOutcomeSummary[];
-  features: { spam_score: number | null; credibility_score: number | null } | null;
+  predictions?: TweetPredictionSummary[];
+  features: {
+    spam_score: number | null;
+    credibility_score: number | null;
+    model_direction_pred?: string | null;
+    model_direction_conf?: number | null;
+    model_version?: string | null;
+  } | null;
   qqq?: { score: number; reasons: string[]; allowlisted_source: boolean };
 };
 
+// ─── Model prediction badge ───────────────────────────────────────────────────
+
+function ModelPredBadge({
+  direction,
+  confidence,
+}: {
+  direction: string | null | undefined;
+  confidence?: number | null;
+}) {
+  if (!direction) return <span className="text-xs text-muted-foreground">—</span>;
+  const map: Record<string, string> = {
+    BULLISH: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+    BEARISH: "bg-rose-50 text-rose-700 border border-rose-200",
+    NEUTRAL: "bg-gray-50 text-gray-500 border border-gray-200",
+  };
+  const icon =
+    direction === "BULLISH" ? "↑ " : direction === "BEARISH" ? "↓ " : "→ ";
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-semibold ${map[direction] ?? "bg-gray-50 text-gray-500"}`}
+      title={confidence != null ? `Confidence: ${(confidence * 100).toFixed(0)}%` : undefined}
+    >
+      {icon}
+      {direction}
+      {confidence != null && (
+        <span className="ml-0.5 text-[10px] opacity-70">
+          {(confidence * 100).toFixed(0)}%
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ─── Tweet card ───────────────────────────────────────────────────────────────
 
-const HORIZONS = ["M5", "M15", "H1", "H4", "D1"];
+const HORIZONS = ["M5", "M15", "M30", "H1", "H4", "H6", "D1"];
 
 function TweetCard({ tweet }: { tweet: TweetRow }) {
   const [expanded, setExpanded] = useState(false);
@@ -309,19 +362,52 @@ function TweetCard({ tweet }: { tweet: TweetRow }) {
         </div>
       </div>
 
-      {/* QQQ signal row */}
-      {tweet.qqq && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-          <span className="inline-flex items-center rounded-full bg-surface px-2 py-0.5 font-mono text-foreground">
-            QQQ score: {tweet.qqq.score.toFixed(2)}
-          </span>
-          {tweet.qqq.allowlisted_source && (
-            <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 font-semibold text-green-700 border border-green-200">
-              allowlisted source
+      {/* Signal row: QQQ score + model D1 prediction */}
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+        {tweet.qqq && (
+          <>
+            <span className="inline-flex items-center rounded-full bg-surface px-2 py-0.5 font-mono text-foreground">
+              QQQ score: {tweet.qqq.score.toFixed(2)}
             </span>
-          )}
-        </div>
-      )}
+            {tweet.qqq.allowlisted_source && (
+              <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 font-semibold text-green-700 border border-green-200">
+                allowlisted source
+              </span>
+            )}
+          </>
+        )}
+        {tweet.features?.model_direction_pred && (() => {
+          const pred = tweet.features!.model_direction_pred;
+          const d1actual = tweet.outcomes.find((o) => o.horizon === "D1")?.direction_label ?? null;
+          const hasActual = d1actual !== null;
+          const correct = hasActual ? pred === d1actual : null;
+          return (
+            <span className="flex items-center gap-1">
+              <span className="text-muted-foreground">Model D1:</span>
+              <ModelPredBadge
+                direction={pred}
+                confidence={tweet.features!.model_direction_conf ?? undefined}
+              />
+              {tweet.is_in_sample ? (
+                <span className="text-[10px] text-muted-foreground border border-border rounded-full px-1.5 py-0.5">
+                  trained
+                </span>
+              ) : hasActual ? (
+                <span
+                  title={`Actual: ${d1actual}`}
+                  className={`text-[11px] font-bold rounded-full px-1.5 py-0.5 ${
+                    correct
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : "bg-rose-50 text-rose-700 border border-rose-200"
+                  }`}
+                >
+                  {correct ? "✓" : "✗"}
+                </span>
+              ) : null}
+            </span>
+          );
+        })()}
+      </div>
 
       {/* Tweet text */}
       <p className="mt-3 text-sm text-foreground leading-relaxed line-clamp-3">
@@ -383,15 +469,16 @@ function TweetCard({ tweet }: { tweet: TweetRow }) {
         )}
       </div>
 
-      {/* Expanded outcomes table */}
-      {expanded && tweet.outcomes.length > 0 && (
+      {/* Expanded outcomes + predictions table */}
+      {expanded && (tweet.outcomes.length > 0 || (tweet.predictions ?? []).length > 0) && (
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-xs border-collapse">
             <thead>
               <tr className="border-b border-border">
-                <th className="text-left py-1.5 pr-4 font-semibold text-muted-foreground">Ticker</th>
+                <th className="text-left py-1.5 pr-3 font-semibold text-muted-foreground w-28">Ticker</th>
+                <th className="text-left py-1.5 pr-3 font-semibold text-muted-foreground w-16">Type</th>
                 {HORIZONS.map((h) => (
-                  <th key={h} className="text-center py-1.5 px-2 font-semibold text-muted-foreground">
+                  <th key={h} className="text-center py-1.5 px-1.5 font-semibold text-muted-foreground">
                     {h}
                   </th>
                 ))}
@@ -404,31 +491,77 @@ function TweetCard({ tweet }: { tweet: TweetRow }) {
                     .filter((o) => o.ticker === ticker)
                     .map((o) => [o.horizon, o])
                 );
+                const predsByHorizon = Object.fromEntries(
+                  (tweet.predictions ?? [])
+                    .filter((p) => p.ticker === ticker)
+                    .map((p) => [p.horizon, p])
+                );
+                const hasPreds = Object.keys(predsByHorizon).length > 0;
+                const hasOutcomes = Object.keys(byHorizon).length > 0;
                 return (
-                  <tr key={ticker} className="border-b border-border/50">
-                    <td className="py-2 pr-4 font-semibold">{ticker}</td>
-                    {HORIZONS.map((h) => {
-                      const o = byHorizon[h];
-                      return (
-                        <td key={h} className="py-2 px-2 text-center">
-                          {o ? (
-                            <div className="flex flex-col items-center gap-0.5">
-                              <DirectionBadge label={o.direction_label} />
-                              <span
-                                className={`font-mono text-xs ${
-                                  (o.raw_return ?? 0) > 0 ? "text-green-600" : (o.raw_return ?? 0) < 0 ? "text-red-600" : "text-gray-500"
-                                }`}
-                              >
-                                {fmtReturn(o.raw_return)}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
+                  <>
+                    {/* Actual outcomes row */}
+                    {hasOutcomes && (
+                      <tr key={`${ticker}-actual`} className="border-b border-border/40">
+                        <td className="py-2 pr-3 font-semibold">{ticker}</td>
+                        <td className="py-2 pr-3 text-muted-foreground text-[10px] uppercase tracking-wide">Actual</td>
+                        {HORIZONS.map((h) => {
+                          const o = byHorizon[h];
+                          return (
+                            <td key={h} className="py-2 px-1.5 text-center">
+                              {o ? (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <DirectionBadge label={o.direction_label} />
+                                  <span
+                                    className={`font-mono text-[10px] ${
+                                      (o.raw_return ?? 0) > 0
+                                        ? "text-green-600"
+                                        : (o.raw_return ?? 0) < 0
+                                        ? "text-red-600"
+                                        : "text-gray-500"
+                                    }`}
+                                  >
+                                    {fmtReturn(o.raw_return)}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    )}
+                    {/* Model predictions row */}
+                    {hasPreds && (
+                      <tr
+                        key={`${ticker}-model`}
+                        className="border-b border-border/40 bg-blue-50/30"
+                      >
+                        <td className="py-2 pr-3 font-semibold text-muted-foreground">
+                          {!hasOutcomes ? ticker : ""}
                         </td>
-                      );
-                    })}
-                  </tr>
+                        <td className="py-2 pr-3 text-[10px] uppercase tracking-wide text-blue-600 font-semibold">
+                          Model
+                        </td>
+                        {HORIZONS.map((h) => {
+                          const p = predsByHorizon[h];
+                          return (
+                            <td key={h} className="py-2 px-1.5 text-center">
+                              {p ? (
+                                <ModelPredBadge
+                                  direction={p.direction_pred}
+                                  confidence={p.confidence}
+                                />
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    )}
+                  </>
                 );
               })}
             </tbody>
@@ -447,10 +580,41 @@ function FeedSection() {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
+  const [sectionTotals, setSectionTotals] = useState<{
+    uncomputed: number;
+    impact_1_5: number;
+    impact_5_8: number;
+    impact_8_10: number;
+  } | null>(null);
   const [ticker, setTicker] = useState("");
   const [tickerFilter, setTickerFilter] = useState("");
   const [qqqMode, setQqqMode] = useState(true);
+  const [section, setSection] = useState<
+    "all" | "uncomputed" | "impact_1_5" | "impact_5_8" | "impact_8_10"
+  >("all");
   const LIMIT = 20;
+
+  function maxAbsImpact(t: TweetRow): number {
+    const impacts = t.outcomes
+      .map((o) => (o.impact_score == null ? 0 : Math.abs(o.impact_score)))
+      .filter((n) => Number.isFinite(n));
+    return impacts.length ? Math.max(...impacts) : 0;
+  }
+
+  function inSection(t: TweetRow): boolean {
+    const max = maxAbsImpact(t);
+    const computed = t.outcomes.length > 0;
+    if (section === "all") return true;
+    if (section === "uncomputed") return !computed;
+    if (!computed) return false;
+    if (section === "impact_1_5") return max >= 1 && max < 5;
+    if (section === "impact_5_8") return max >= 5 && max < 8;
+    if (section === "impact_8_10") return max >= 8 && max <= 10;
+    return true;
+  }
+
+  const filteredTweets = tweets.filter(inSection);
 
   const load = useCallback(
     async (reset: boolean) => {
@@ -465,6 +629,19 @@ function FeedSection() {
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
         const rows: TweetRow[] = data.tweets ?? [];
+        const totalRows: number | null =
+          typeof data.total === "number" && Number.isFinite(data.total) ? data.total : null;
+        if (totalRows != null) setTotal(totalRows);
+        if (data.section_totals && typeof data.section_totals === "object") {
+          const st = data.section_totals as Record<string, unknown>;
+          const next = {
+            uncomputed: Number(st.uncomputed ?? 0) || 0,
+            impact_1_5: Number(st.impact_1_5 ?? 0) || 0,
+            impact_5_8: Number(st.impact_5_8 ?? 0) || 0,
+            impact_8_10: Number(st.impact_8_10 ?? 0) || 0,
+          };
+          setSectionTotals(next);
+        }
         setTweets((prev) => (reset ? rows : [...prev, ...rows]));
         setOffset(nextOffset + rows.length);
         setHasMore(rows.length === LIMIT);
@@ -491,6 +668,8 @@ function FeedSection() {
     setOffset(0);
     setHasMore(true);
     setTweets([]);
+    setTotal(null);
+    setSectionTotals(null);
     setLoading(true);
     const params = new URLSearchParams({ limit: String(LIMIT), offset: "0" });
     if (ticker.trim()) params.set("ticker", ticker.toUpperCase().trim());
@@ -502,6 +681,18 @@ function FeedSection() {
         setTweets(rows);
         setOffset(rows.length);
         setHasMore(rows.length === LIMIT);
+        if (typeof data.total === "number" && Number.isFinite(data.total)) {
+          setTotal(data.total);
+        }
+        if (data.section_totals && typeof data.section_totals === "object") {
+          const st = data.section_totals as Record<string, unknown>;
+          setSectionTotals({
+            uncomputed: Number(st.uncomputed ?? 0) || 0,
+            impact_1_5: Number(st.impact_1_5 ?? 0) || 0,
+            impact_5_8: Number(st.impact_5_8 ?? 0) || 0,
+            impact_8_10: Number(st.impact_8_10 ?? 0) || 0,
+          });
+        }
         setError(null);
       })
       .catch((err) => setError(String(err)))
@@ -572,16 +763,52 @@ function FeedSection() {
         </button>
       </div>
 
+      <div className="text-xs text-muted-foreground">
+        Loaded <span className="font-semibold text-foreground">{tweets.length}</span> /{" "}
+        <span className="font-semibold text-foreground">
+          {total == null ? "…" : total}
+        </span>{" "}
+        matching tweets (page size {LIMIT}).
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {(
+          [
+            { id: "all", label: "All", count: total ?? tweets.length },
+            { id: "uncomputed", label: "Not computed", count: sectionTotals?.uncomputed ?? 0 },
+            { id: "impact_1_5", label: "|impact| 1–5", count: sectionTotals?.impact_1_5 ?? 0 },
+            { id: "impact_5_8", label: "|impact| 5–8", count: sectionTotals?.impact_5_8 ?? 0 },
+            { id: "impact_8_10", label: "|impact| 8–10", count: sectionTotals?.impact_8_10 ?? 0 },
+          ] as const
+        ).map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => setSection(s.id)}
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+              section === s.id
+                ? "border-foreground/20 bg-foreground/5 text-foreground"
+                : "border-border bg-white text-muted-foreground hover:text-foreground hover:border-foreground/20"
+            }`}
+          >
+            <span>{s.label}</span>
+            <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-muted-foreground font-mono">
+              {s.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
       <ErrorBox msg={error} />
 
-      {tweets.length === 0 && !loading && (
+      {filteredTweets.length === 0 && !loading && (
         <div className="rounded-2xl border border-dashed border-border bg-surface py-16 text-center text-sm text-muted-foreground">
-          No tweets yet — run an ingest to populate the feed.
+          No tweets in this section — try a different filter or run an ingest.
         </div>
       )}
 
       <div className="grid gap-3">
-        {tweets.map((t) => (
+        {filteredTweets.map((t) => (
           <TweetCard key={t.id} tweet={t} />
         ))}
       </div>
@@ -603,6 +830,85 @@ function FeedSection() {
   );
 }
 
+// ─── Status section ───────────────────────────────────────────────────────────
+
+type StatusPayload = {
+  tweets: number;
+  outcomes: number;
+  last_outcome_at: string | null;
+  last_ingest_job: Record<string, unknown> | null;
+};
+
+function StatusSection() {
+  const [data, setData] = useState<StatusPayload | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/twitterai/status", { cache: "no-store" });
+      const json = (await res.json().catch(() => null)) as StatusPayload | null;
+      if (!res.ok) throw new Error((json as any)?.error || `HTTP ${res.status}`);
+      setData(json);
+    } catch (err) {
+      setError(String(err));
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load().catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <SectionCard label="STATUS">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm text-muted-foreground">
+          Quick snapshot of DB counts + last ingest job.
+        </div>
+        <button onClick={() => load()} disabled={loading} className={secondaryBtnCls}>
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      <ErrorBox msg={error} />
+
+      {data && (
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <div className="text-xs text-muted-foreground">Tweets</div>
+            <div className="text-2xl font-semibold">{data.tweets ?? 0}</div>
+          </div>
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <div className="text-xs text-muted-foreground">Outcomes</div>
+            <div className="text-2xl font-semibold">{data.outcomes ?? 0}</div>
+          </div>
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <div className="text-xs text-muted-foreground">Last outcome</div>
+            <div className="text-sm font-semibold">
+              {data.last_outcome_at ? new Date(data.last_outcome_at).toLocaleString() : "—"}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {data?.last_ingest_job && (
+        <div className="mt-4">
+          <div className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">
+            LAST INGEST JOB
+          </div>
+          <ResultBox data={data.last_ingest_job} />
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ─── Ingest section ───────────────────────────────────────────────────────────
 
 type Preset = {
@@ -620,7 +926,8 @@ type Preset = {
 const PRESETS: Preset[] = [
   {
     label: "QQQ (high-signal)",
-    searchTerms: "QQQ, $QQQ, Nasdaq 100, Invesco QQQ, NDX",
+    // One OR-query matches DEFAULT_QQQ_SEARCH_TERMS — avoids splitting max_items across many API runs.
+    searchTerms: 'QQQ OR $QQQ OR "Invesco QQQ" OR "Nasdaq 100" OR NDX',
     handles: "",
     maxItems: "200",
     sort: "Latest",
@@ -642,6 +949,10 @@ type IngestResult = {
   features_upserted?: number;
 };
 
+function ingestPollSleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 function IngestResultCard({ data }: { data: unknown }) {
   if (data === null) return null;
   const d = data as Record<string, unknown>;
@@ -655,7 +966,9 @@ function IngestResultCard({ data }: { data: unknown }) {
     { label: "Items skipped", value: r.items_skipped },
     { label: "Asset matches", value: r.asset_matches_created },
     { label: "Features upserted", value: r.features_upserted },
-  ];
+  ].filter(
+    (s) => s.value !== undefined && s.value !== null
+  );
   return (
     <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -670,10 +983,16 @@ function IngestResultCard({ data }: { data: unknown }) {
         {stats.map(({ label, value }) => (
           <div key={label} className="flex flex-col">
             <span className="text-xs text-muted-foreground">{label}</span>
-            <span className="text-sm font-semibold text-foreground">{value ?? 0}</span>
+            <span className="text-sm font-semibold text-foreground">{value as number}</span>
           </div>
         ))}
       </div>
+      {stats.length === 1 && stats[0]?.label === "Items received" ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Detailed upsert counts are available after synchronous ingest, or in the database / Status
+          tab.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -707,14 +1026,21 @@ function IngestSection() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setResult(null);
     setError(null);
+    const maxParsed = parseInt(maxItems, 10);
+    const maxItemsN = Number.isFinite(maxParsed) ? maxParsed : 50;
+    if (maxItemsN < 1 || maxItemsN > 3000) {
+      setError("Max items must be between 1 and 3000.");
+      return;
+    }
+    setLoading(true);
     try {
       const body: Record<string, unknown> = {
         search_terms: parseLines(searchTerms),
-        max_items: parseInt(maxItems, 10) || 50,
+        max_items: maxItemsN,
         sort,
+        background: true,
       };
       const parsedHandles = parseLines(handles);
       if (parsedHandles.length) body.twitter_handles = parsedHandles;
@@ -725,8 +1051,65 @@ function IngestSection() {
       if (minRetweets) body.minimum_retweets = parseInt(minRetweets, 10);
       if (minFavs) body.minimum_favorites = parseInt(minFavs, 10);
 
-      const data = await post("/api/twitterai/ingest", body);
-      setResult(data);
+      const res = await fetch("/api/twitterai/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const raw = await res.json().catch(() => null);
+      if (!res.ok) {
+        const d = raw as Record<string, unknown> | null;
+        const msg = d?.message || d?.error || `HTTP ${res.status}`;
+        const details = d?.details || d?.detail;
+        const detailStr =
+          details && typeof details === "object"
+            ? JSON.stringify(details)
+            : details
+              ? String(details)
+              : null;
+        throw new Error(detailStr ? `${msg} — ${detailStr}` : String(msg));
+      }
+
+      if (res.status === 202) {
+        const jobId = String((raw as Record<string, unknown>)?.job_id || "");
+        if (!jobId) throw new Error("No job_id in ingest response");
+        const POLL_MS = 2000;
+        const POLL_MAX = 3600;
+        for (let i = 0; i < POLL_MAX; i++) {
+          await ingestPollSleep(POLL_MS);
+          const stRes = await fetch(
+            `/api/twitterai/status?job_id=${encodeURIComponent(jobId)}`
+          );
+          const st = await stRes.json().catch(() => null);
+          const job = st?.last_ingest_job as Record<string, unknown> | null;
+          if (!job || String(job.id) !== jobId) continue;
+          const stLabel = String(job.status || "");
+          if (stLabel !== "SUCCEEDED" && stLabel !== "FAILED") continue;
+          if (stLabel === "FAILED") {
+            const em = job.error_message ? String(job.error_message) : "Ingest failed";
+            setError(em);
+            setResult({ job_id: jobId, error: em });
+            return;
+          }
+          const rawReceived = job.items_received;
+          if (rawReceived === undefined || rawReceived === null) {
+            continue;
+          }
+          const itemsReceived =
+            typeof rawReceived === "number" ? rawReceived : Number(rawReceived);
+          setResult({
+            job_id: jobId,
+            items_received: Number.isFinite(itemsReceived) ? itemsReceived : undefined,
+          });
+          return;
+        }
+        setError(
+          "Timed out waiting for ingest (job may still be running — open the Status tab to confirm)."
+        );
+        return;
+      }
+
+      setResult(raw);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -794,13 +1177,12 @@ function IngestSection() {
         )}
 
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Max items">
+          <Field label="Max items (1–3000)">
             <input
               type="number"
               className={inputCls}
               value={maxItems}
               min={1}
-              max={1000}
               onChange={(e) => setMaxItems(e.target.value)}
             />
           </Field>
@@ -913,7 +1295,7 @@ function ComputeOutcomesSection() {
     }
   }
 
-  async function run() {
+  async function run(allTweets: boolean) {
     setLoading(true);
     setResult(null);
     setError(null);
@@ -925,7 +1307,12 @@ function ComputeOutcomesSection() {
       pollRef.current = window.setInterval(() => {
         fetchLogs().catch(() => null);
       }, 1200);
-      const data = await post("/api/twitterai/compute-outcomes", { limit: parseInt(limit, 10) || 50, qqq_only: true });
+      const data = await post("/api/twitterai/compute-outcomes", {
+        limit: parseInt(limit, 10) || 50,
+        qqq_only: true,
+        all_tweets: allTweets,
+        chunk_size: 80,
+      });
       setResult(data);
     } catch (err) {
       setError(String(err));
@@ -941,9 +1328,12 @@ function ComputeOutcomesSection() {
   return (
     <SectionCard label="COMPUTE OUTCOMES">
       <p className="mb-4 text-sm text-muted-foreground">
-        Fetch price data and compute market outcomes for unprocessed tweets across all horizons (M5, M15, H1, H4, D1).
+        Fetch price data and compute outcomes for every horizon (M5 … D1) for tweets that need them — including{" "}
+        <span className="font-semibold">backfill</span> when a tweet already has some horizons but not all (e.g. only M5
+        and D1). New rows are merged; existing cells are updated. Already-complete tweets (all 7 horizons for each
+        allowed ticker) are skipped — use this to backfill gaps, not to force-refresh everything.
       </p>
-      <div className="flex items-end gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <Field label="Limit">
           <input
             type="number"
@@ -952,10 +1342,14 @@ function ComputeOutcomesSection() {
             min={1}
             max={500}
             onChange={(e) => setLimit(e.target.value)}
+            disabled={loading}
           />
         </Field>
-        <button type="button" disabled={loading} onClick={run} className={btnCls}>
+        <button type="button" disabled={loading} onClick={() => run(false)} className={btnCls}>
           {loading ? "Running…" : "Run"}
+        </button>
+        <button type="button" disabled={loading} onClick={() => run(true)} className={secondaryBtnCls}>
+          {loading ? "Running…" : "Compute all"}
         </button>
       </div>
       <ErrorBox msg={error} />
@@ -967,6 +1361,7 @@ function ComputeOutcomesSection() {
             { label: "Outcomes created", key: "created_outcomes" },
             { label: "Skipped (no asset)", key: "skipped_no_asset" },
             { label: "Errors", key: "errors" },
+            { label: "Chunks", key: "chunks_completed" },
           ].map(({ label, key }) => (
             <div key={key} className="flex flex-col">
               <span className="text-xs text-muted-foreground">{label}</span>
@@ -1013,7 +1408,7 @@ function RecomputeLabelsSection() {
     }
   }
 
-  async function run() {
+  async function run(allRows: boolean) {
     setLoading(true);
     setResult(null);
     setError(null);
@@ -1025,7 +1420,10 @@ function RecomputeLabelsSection() {
       pollRef.current = window.setInterval(() => {
         fetchLogs().catch(() => null);
       }, 1200);
-      const data = await post("/api/twitterai/recompute-labels", { limit: parseInt(limit, 10) || 500 });
+      const body = allRows
+        ? { all_rows: true, limit: 500 }
+        : { limit: parseInt(limit, 10) || 500 };
+      const data = await post("/api/twitterai/recompute-labels", body);
       setResult(data);
     } catch (err) {
       setError(String(err));
@@ -1041,34 +1439,64 @@ function RecomputeLabelsSection() {
   return (
     <SectionCard label="RECOMPUTE LABELS">
       <p className="mb-4 text-sm text-muted-foreground">
-        Re-run the vol-adjusted impact scoring on existing outcomes. Use after tuning the impact multiplier.
+        Re-run the vol-adjusted impact scoring on existing outcomes. Use after tuning the impact multiplier.{" "}
+        <span className="font-semibold">Recompute all</span> also writes a <code className="text-xs">.jsonl</code> file on
+        the TwitterAI server (same line format as Export / <code className="text-xs">data.jsonl</code>), under{" "}
+        <code className="text-xs">AI/TwitterAI/exports/</code>. Buttons stay on
+        &quot;Running…&quot; until that file is written (after the DB update). Watch live logs for the export line, then
+        the result below for the path.
       </p>
-      <div className="flex items-end gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <Field label="Limit">
           <input
             type="number"
             className={`${inputCls} w-28`}
             value={limit}
             min={1}
-            max={2000}
+            max={2000000}
             onChange={(e) => setLimit(e.target.value)}
+            disabled={loading}
           />
         </Field>
-        <button type="button" disabled={loading} onClick={run} className={btnCls}>
+        <button type="button" disabled={loading} onClick={() => run(false)} className={btnCls}>
           {loading ? "Running…" : "Run"}
+        </button>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => run(true)}
+          className={secondaryBtnCls}
+        >
+          {loading ? "Running…" : "Recompute all"}
         </button>
       </div>
       <ErrorBox msg={error} />
       {r && !r.error && (
-        <div className="mt-4 grid grid-cols-2 gap-4">
-          <div className="flex flex-col">
-            <span className="text-xs text-muted-foreground">Scanned</span>
-            <span className="text-sm font-semibold">{String(r.scanned ?? 0)}</span>
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col">
+              <span className="text-xs text-muted-foreground">Scanned</span>
+              <span className="text-sm font-semibold">{String(r.scanned ?? 0)}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs text-muted-foreground">Updated</span>
+              <span className="text-sm font-semibold">{String(r.updated ?? 0)}</span>
+            </div>
           </div>
-          <div className="flex flex-col">
-            <span className="text-xs text-muted-foreground">Updated</span>
-            <span className="text-sm font-semibold">{String(r.updated ?? 0)}</span>
-          </div>
+          {(() => {
+            const de = r.diagnostic_export;
+            if (de == null || typeof de !== "object") return null;
+            const d = de as Record<string, unknown>;
+            return (
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <div className="text-xs font-semibold tracking-wide text-muted-foreground">DIAGNOSTIC EXPORT</div>
+                <div className="mt-1 break-all font-mono text-xs text-foreground">
+                  {String(d.path ?? "")}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">Rows: {String(d.rows ?? "—")}</div>
+              </div>
+            );
+          })()}
         </div>
       )}
       <LiveLogs
@@ -1237,6 +1665,710 @@ function ExportSection() {
   );
 }
 
+// ─── Model section ────────────────────────────────────────────────────────────
+
+type ModelStatus = {
+  ready: boolean;
+  version?: string | null;
+  trained_at?: string | null;
+  cv_macro_f1?: number | null;
+  cv_weighted_f1?: number | null;
+  n_features?: number | null;
+  class_distribution?: Record<string, number> | null;
+  top_features?: Array<{ feature: string; importance: number }> | null;
+  reason?: string | null;
+};
+
+function ModelStatusCard({
+  status,
+  onRefresh,
+  loading,
+}: {
+  status: ModelStatus | null;
+  onRefresh: () => void;
+  loading: boolean;
+}) {
+  return (
+    <SectionCard label="MODEL STATUS">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <p className="text-sm text-muted-foreground">
+          Current LightGBM classifier status — version, CV metrics, and top feature importances.
+        </p>
+        <button onClick={onRefresh} disabled={loading} className={secondaryBtnCls}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+
+      {!status && !loading && (
+        <div className="rounded-xl border border-dashed border-border bg-surface py-10 text-center text-sm text-muted-foreground">
+          No model loaded — train one below.
+        </div>
+      )}
+
+      {status && !status.ready && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          {status.reason ?? "Model not loaded. Train one below."}
+        </div>
+      )}
+
+      {status?.ready && (
+        <div className="grid gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <div className="text-xs text-muted-foreground">Version</div>
+              <div className="text-sm font-semibold font-mono truncate">{status.version ?? "—"}</div>
+            </div>
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <div className="text-xs text-muted-foreground">CV Macro-F1</div>
+              <div className={`text-xl font-semibold ${(status.cv_macro_f1 ?? 0) >= 0.5 ? "text-green-600" : "text-amber-600"}`}>
+                {status.cv_macro_f1 != null ? (status.cv_macro_f1 * 100).toFixed(1) + "%" : "—"}
+              </div>
+            </div>
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <div className="text-xs text-muted-foreground">CV Weighted-F1</div>
+              <div className="text-xl font-semibold">
+                {status.cv_weighted_f1 != null ? (status.cv_weighted_f1 * 100).toFixed(1) + "%" : "—"}
+              </div>
+            </div>
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <div className="text-xs text-muted-foreground">Features</div>
+              <div className="text-xl font-semibold">{status.n_features ?? "—"}</div>
+            </div>
+          </div>
+
+          {status.trained_at && (
+            <div className="text-xs text-muted-foreground">
+              Trained {new Date(status.trained_at).toLocaleString()}
+            </div>
+          )}
+
+          {status.class_distribution && (
+            <div>
+              <div className="mb-2 text-xs font-semibold tracking-[0.22em] text-muted-foreground">CLASS DISTRIBUTION</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(status.class_distribution).map(([cls, count]) => (
+                  <span
+                    key={cls}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+                      cls === "BULLISH"
+                        ? "bg-green-100 text-green-700"
+                        : cls === "BEARISH"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {cls === "BULLISH" ? "↑" : cls === "BEARISH" ? "↓" : "→"} {cls}
+                    <span className="rounded-full bg-white/60 px-1.5 font-mono">{count.toLocaleString()}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {status.top_features && status.top_features.length > 0 && (
+            <div>
+              <div className="mb-2 text-xs font-semibold tracking-[0.22em] text-muted-foreground">TOP FEATURES</div>
+              <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                {status.top_features.map((f, i) => {
+                  const maxImp = status.top_features![0].importance;
+                  const pct = maxImp > 0 ? (f.importance / maxImp) * 100 : 0;
+                  return (
+                    <div key={f.feature} className="flex items-center gap-2">
+                      <span className="w-5 shrink-0 text-right text-[11px] text-muted-foreground font-mono">{i + 1}.</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="truncate text-xs font-mono text-foreground">{f.feature}</span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">{f.importance.toFixed(0)}</span>
+                        </div>
+                        <div className="mt-0.5 h-1 w-full rounded-full bg-border overflow-hidden">
+                          <div className="h-full rounded-full bg-foreground/50" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function TrainCard({ onTrainComplete }: { onTrainComplete: () => void }) {
+  const [version, setVersion] = useState("");
+  const [minOutcomes, setMinOutcomes] = useState("50");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<unknown>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lines, setLines] = useState<string[]>([]);
+  const pollRef = useRef<number | null>(null);
+
+  async function fetchLogs() {
+    const res = await fetch("/api/twitterai/logs?limit=400");
+    const data = await res.json().catch(() => null);
+    setLines((data?.lines as string[]) ?? []);
+  }
+
+  function stopPoll() {
+    if (pollRef.current != null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  async function run(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setResult(null);
+    setError(null);
+    setLines([]);
+    stopPoll();
+    try {
+      await fetch("/api/twitterai/logs/clear", { method: "POST" }).catch(() => null);
+      await fetchLogs().catch(() => null);
+      pollRef.current = window.setInterval(() => fetchLogs().catch(() => null), 1500);
+      const body: Record<string, unknown> = {
+        min_outcomes: parseInt(minOutcomes, 10) || 50,
+      };
+      if (version.trim()) body.version = version.trim();
+      const data = await post("/api/twitterai/train", body);
+      setResult(data);
+      onTrainComplete();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+      stopPoll();
+      await fetchLogs().catch(() => null);
+    }
+  }
+
+  const r = result as Record<string, unknown> | null;
+
+  return (
+    <SectionCard label="TRAIN MODEL">
+      <p className="mb-4 text-sm text-muted-foreground">
+        Train a new LightGBM classifier on all labeled tweet outcomes. Uses StratifiedKFold CV and reports macro-F1.
+        Training runs on the server — live logs stream below.
+      </p>
+      <form onSubmit={run} className="grid gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Version tag (optional)">
+            <input
+              className={inputCls}
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+              placeholder="e.g. v2 (auto-assigned if blank)"
+              disabled={loading}
+            />
+          </Field>
+          <Field label="Min labeled outcomes required">
+            <input
+              type="number"
+              className={inputCls}
+              value={minOutcomes}
+              min={1}
+              onChange={(e) => setMinOutcomes(e.target.value)}
+              disabled={loading}
+            />
+          </Field>
+        </div>
+        <ErrorBox msg={error} />
+        <div>
+          <button type="submit" disabled={loading} className={btnCls}>
+            {loading ? "Training…" : "Train"}
+          </button>
+        </div>
+      </form>
+
+      {r && !r.error && (
+        <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4">
+          <div className="mb-3 text-xs font-semibold text-green-700">Training complete</div>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
+            {[
+              { label: "Version", val: r.model_version ?? r.version },
+              { label: "CV Macro-F1", val: r.cv_macro_f1 != null ? `${((r.cv_macro_f1 as number) * 100).toFixed(1)}%` : null },
+              { label: "CV Weighted-F1", val: r.cv_weighted_f1 != null ? `${((r.cv_weighted_f1 as number) * 100).toFixed(1)}%` : null },
+              { label: "Training rows", val: r.n_samples ?? r.training_rows },
+              { label: "Features", val: r.n_features },
+              { label: "Folds", val: r.n_folds },
+            ].map(({ label, val }) =>
+              val != null ? (
+                <div key={label} className="flex flex-col">
+                  <span className="text-xs text-muted-foreground">{label}</span>
+                  <span className="text-sm font-semibold text-foreground font-mono">{String(val)}</span>
+                </div>
+              ) : null
+            )}
+          </div>
+        </div>
+      )}
+
+      <LiveLogs lines={lines} title={loading ? "Live output (training…)" : "Live output (last run)"} />
+
+      {!loading && result !== null && (
+        <div className="mt-4">
+          <div className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">FULL RESULT</div>
+          <ResultBox data={result} />
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function BackfillCard({ onComplete }: { onComplete: () => void }) {
+  const [limit, setLimit] = useState("500");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<unknown>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lines, setLines] = useState<string[]>([]);
+  const pollRef = useRef<number | null>(null);
+
+  async function fetchLogs() {
+    const res = await fetch("/api/twitterai/logs?limit=400");
+    const data = await res.json().catch(() => null);
+    setLines((data?.lines as string[]) ?? []);
+  }
+
+  function stopPoll() {
+    if (pollRef.current != null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  async function run(allTweets: boolean) {
+    setLoading(true);
+    setResult(null);
+    setError(null);
+    setLines([]);
+    stopPoll();
+    try {
+      await fetch("/api/twitterai/logs/clear", { method: "POST" }).catch(() => null);
+      await fetchLogs().catch(() => null);
+      pollRef.current = window.setInterval(() => fetchLogs().catch(() => null), 1500);
+      const data = await post("/api/twitterai/backfill-predictions", {
+        limit: parseInt(limit, 10) || 500,
+        all_tweets: allTweets,
+      });
+      setResult(data);
+      onComplete();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+      stopPoll();
+      await fetchLogs().catch(() => null);
+    }
+  }
+
+  const r = result as Record<string, unknown> | null;
+
+  return (
+    <SectionCard label="BACKFILL PREDICTIONS">
+      <p className="mb-4 text-sm text-muted-foreground">
+        Run the current model on all tweets that have asset matches but no predictions stored yet.
+        New predictions are upserted per-ticker per-horizon. The D1 summary is also written to{" "}
+        <code className="text-xs">tweet_features</code>.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label="Limit">
+          <input
+            type="number"
+            className={`${inputCls} w-28`}
+            value={limit}
+            min={1}
+            max={100000}
+            onChange={(e) => setLimit(e.target.value)}
+            disabled={loading}
+          />
+        </Field>
+        <button type="button" disabled={loading} onClick={() => run(false)} className={btnCls}>
+          {loading ? "Running…" : "Backfill"}
+        </button>
+        <button type="button" disabled={loading} onClick={() => run(true)} className={secondaryBtnCls}>
+          {loading ? "Running…" : "Backfill all"}
+        </button>
+      </div>
+      <ErrorBox msg={error} />
+
+      {r && !r.error && (
+        <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4">
+          <div className="mb-3 text-xs font-semibold text-green-700">Backfill complete</div>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
+            {[
+              { label: "Tweets processed", val: r.tweets_processed },
+              { label: "Predictions created", val: r.predictions_created },
+              { label: "Skipped (no model)", val: r.skipped_no_model },
+              { label: "Errors", val: r.errors },
+            ].map(({ label, val }) =>
+              val != null ? (
+                <div key={label} className="flex flex-col">
+                  <span className="text-xs text-muted-foreground">{label}</span>
+                  <span className="text-sm font-semibold text-foreground">{String(val)}</span>
+                </div>
+              ) : null
+            )}
+          </div>
+        </div>
+      )}
+
+      <LiveLogs lines={lines} title={loading ? "Live output (running…)" : "Live output (last run)"} />
+
+      {!loading && result !== null && (
+        <div className="mt-4">
+          <div className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">FULL RESULT</div>
+          <ResultBox data={result} />
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ─── Test evaluation section ──────────────────────────────────────────────────
+
+const EVAL_HORIZONS = ["M5", "M15", "M30", "H1", "H4", "H6", "D1"];
+
+function fmtEvalReturn(r: number | null | undefined) {
+  if (r == null || !Number.isFinite(r)) return null;
+  const pct = r * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(2)}%`;
+}
+
+function HorizonCell({
+  pred,
+  actual,
+  actualReturn,
+}: {
+  pred: string | undefined;
+  actual: string | null | undefined;
+  actualReturn?: number | null;
+}) {
+  const hasPred = pred != null && pred !== "";
+  const hasActual = actual != null;
+  const correct = hasPred && hasActual ? pred === actual : null;
+  const predColor =
+    pred === "BULLISH"
+      ? "text-green-700"
+      : pred === "BEARISH"
+      ? "text-red-600"
+      : pred
+      ? "text-gray-500"
+      : "text-muted-foreground";
+  const predIcon =
+    pred === "BULLISH" ? "↑" : pred === "BEARISH" ? "↓" : pred ? "→" : "";
+  const actualColor =
+    actual === "BULLISH"
+      ? "text-green-700"
+      : actual === "BEARISH"
+      ? "text-red-600"
+      : actual
+      ? "text-gray-500"
+      : "";
+  const actualIcon =
+    actual === "BULLISH" ? "↑" : actual === "BEARISH" ? "↓" : actual ? "→" : "";
+  const retStr = fmtEvalReturn(actualReturn);
+  return (
+    <td className="py-2 px-1 text-center">
+      <div className="flex flex-col items-center gap-0.5">
+        {hasPred ? (
+          <span className={`text-xs font-semibold ${predColor}`}>
+            {predIcon} {pred.slice(0, 4)}
+          </span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">no pred</span>
+        )}
+        {hasActual ? (
+          <>
+            <span className={`text-[10px] ${actualColor}`}>
+              {actualIcon} {actual!.slice(0, 4)}
+              {retStr != null && (
+                <span className="ml-0.5 font-mono text-muted-foreground">{retStr}</span>
+              )}
+            </span>
+            {correct != null ? (
+              <span
+                className={`text-[10px] font-bold rounded-full px-1 ${
+                  correct
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-rose-50 text-rose-700"
+                }`}
+              >
+                {correct ? "✓" : "✗"}
+              </span>
+            ) : (
+              <span className="text-[10px] text-muted-foreground">—</span>
+            )}
+          </>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">no outcome</span>
+        )}
+      </div>
+    </td>
+  );
+}
+
+function TestEvalSection() {
+  const [tweets, setTweets] = useState<TweetRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const LIMIT = 30;
+
+  async function load(reset: boolean) {
+    setLoading(true);
+    setError(null);
+    const nextOffset = reset ? 0 : offset;
+    try {
+      const params = new URLSearchParams({
+        limit: String(LIMIT),
+        offset: String(nextOffset),
+        test_only: "1",
+      });
+      const res = await fetch(`/api/twitterai/tweets?${params.toString()}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      const rows: TweetRow[] = data.tweets ?? [];
+      if (typeof data.total === "number") setTotal(data.total);
+      setTweets((prev) => (reset ? rows : [...prev, ...rows]));
+      setOffset(nextOffset + rows.length);
+      setHasMore(rows.length === LIMIT);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const didLoad = useRef(false);
+  useEffect(() => {
+    if (!didLoad.current) {
+      didLoad.current = true;
+      load(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Compute per-horizon accuracy stats
+  const stats: Record<string, { correct: number; total: number }> = {};
+  for (const h of EVAL_HORIZONS) {
+    stats[h] = { correct: 0, total: 0 };
+  }
+  for (const tweet of tweets) {
+    const tickers = [...new Set(tweet.asset_matches.map((m) => m.ticker))];
+    for (const ticker of tickers) {
+      const predsByH = Object.fromEntries(
+        (tweet.predictions ?? []).filter((p) => p.ticker === ticker).map((p) => [p.horizon, p])
+      );
+      const actualByH = Object.fromEntries(
+        tweet.outcomes.filter((o) => o.ticker === ticker).map((o) => [o.horizon, o])
+      );
+      for (const h of EVAL_HORIZONS) {
+        const pred = predsByH[h]?.direction_pred;
+        const actual = actualByH[h]?.direction_label;
+        if (pred && actual) {
+          stats[h].total++;
+          if (pred === actual) stats[h].correct++;
+        }
+      }
+    }
+  }
+
+  return (
+    <SectionCard label="TEST SET EVALUATION">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <p className="text-sm text-muted-foreground">
+          Out-of-sample tweets (same temporal cutoff as training: newest ~20% by post time). Each column is a horizon; cells show model direction, actual direction with realized return, and a match badge when both exist.
+        </p>
+        <button onClick={() => load(true)} disabled={loading} className={secondaryBtnCls}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+
+      {/* Accuracy summary bar */}
+      {tweets.length > 0 && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {EVAL_HORIZONS.map((h) => {
+            const s = stats[h];
+            const acc = s.total > 0 ? (s.correct / s.total) * 100 : null;
+            return (
+              <div
+                key={h}
+                className="flex flex-col items-center rounded-xl border border-border bg-surface px-3 py-2 min-w-[56px]"
+              >
+                <span className="text-[10px] font-semibold tracking-wide text-muted-foreground">{h}</span>
+                <span
+                  className={`text-sm font-bold ${
+                    acc == null
+                      ? "text-muted-foreground"
+                      : acc >= 60
+                      ? "text-green-600"
+                      : acc >= 45
+                      ? "text-amber-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {acc != null ? `${acc.toFixed(0)}%` : "—"}
+                </span>
+                {s.total > 0 && (
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {s.correct}/{s.total}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <ErrorBox msg={error} />
+
+      {!loading && tweets.length === 0 && !error && (
+        <div className="rounded-xl border border-dashed border-border bg-surface py-12 text-center text-sm text-muted-foreground">
+          No out-of-sample tweets found. Train a model first, then run backfill-predictions.
+        </div>
+      )}
+
+      {tweets.length > 0 && (
+        <div className="overflow-x-auto">
+          <div className="mb-2 text-xs text-muted-foreground">
+            Showing <span className="font-semibold text-foreground">{tweets.length}</span>
+            {total != null && (
+              <> / <span className="font-semibold text-foreground">{total}</span></>
+            )}{" "}
+            test tweets.
+          </div>
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left py-2 pr-4 font-semibold text-muted-foreground w-56">Tweet</th>
+                <th className="text-left py-2 pr-2 font-semibold text-muted-foreground w-16">Ticker</th>
+                {EVAL_HORIZONS.map((h) => (
+                  <th key={h} className="text-center py-2 px-1 font-semibold text-muted-foreground w-16">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+              <tr className="border-b border-border/40 bg-surface/50">
+                <td colSpan={2} className="py-1 pr-2 text-[10px] text-muted-foreground">Legend</td>
+                <td colSpan={EVAL_HORIZONS.length} className="py-1 text-[10px] text-muted-foreground">
+                  Pred · actual + return · ✓/✗ (only when pred and outcome both exist)
+                </td>
+              </tr>
+            </thead>
+            <tbody>
+              {tweets.map((tweet) => {
+                const tickers = [...new Set(tweet.asset_matches.map((m) => m.ticker))];
+                return tickers.map((ticker, ti) => {
+                  const predsByH = Object.fromEntries(
+                    (tweet.predictions ?? [])
+                      .filter((p) => p.ticker === ticker)
+                      .map((p) => [p.horizon, p])
+                  );
+                  const actualByH = Object.fromEntries(
+                    tweet.outcomes
+                      .filter((o) => o.ticker === ticker)
+                      .map((o) => [o.horizon, o])
+                  );
+                  return (
+                    <tr
+                      key={`${tweet.id}-${ticker}`}
+                      className={`border-b border-border/30 ${ti > 0 ? "bg-surface/30" : ""}`}
+                    >
+                      {ti === 0 ? (
+                        <td
+                          rowSpan={tickers.length}
+                          className="py-2 pr-4 align-top"
+                        >
+                          <div className="font-semibold text-foreground truncate max-w-[220px]">
+                            @{tweet.author?.username ?? "?"}
+                          </div>
+                          <div className="text-muted-foreground line-clamp-2 max-w-[220px] leading-relaxed">
+                            {tweet.text}
+                          </div>
+                          {tweet.created_at_twitter && (
+                            <div className="text-[10px] text-muted-foreground mt-0.5">
+                              {new Date(tweet.created_at_twitter).toLocaleDateString()}
+                            </div>
+                          )}
+                        </td>
+                      ) : null}
+                      <td className="py-2 pr-2 font-mono font-semibold text-foreground align-middle">
+                        {ticker}
+                      </td>
+                      {EVAL_HORIZONS.map((h) => (
+                        <HorizonCell
+                          key={h}
+                          pred={predsByH[h]?.direction_pred}
+                          actual={actualByH[h]?.direction_label}
+                          actualReturn={actualByH[h]?.raw_return}
+                        />
+                      ))}
+                    </tr>
+                  );
+                });
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex justify-center py-6">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-border border-t-foreground" />
+        </div>
+      )}
+
+      {!loading && hasMore && tweets.length > 0 && (
+        <div className="mt-4 flex justify-center">
+          <button onClick={() => load(false)} className={secondaryBtnCls}>
+            Load more
+          </button>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function ModelSection() {
+  const [status, setStatus] = useState<ModelStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+
+  async function loadStatus() {
+    setStatusLoading(true);
+    try {
+      const res = await fetch("/api/twitterai/model-status");
+      const data = (await res.json().catch(() => null)) as ModelStatus | null;
+      setStatus(data);
+    } catch {
+      setStatus(null);
+    } finally {
+      setStatusLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadStatus().catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="grid gap-6">
+      <ModelStatusCard status={status} onRefresh={loadStatus} loading={statusLoading} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <TrainCard onTrainComplete={loadStatus} />
+        <BackfillCard onComplete={loadStatus} />
+      </div>
+      <TestEvalSection />
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function TwitterPage() {
@@ -1256,9 +2388,11 @@ export default function TwitterPage() {
           <TabBar active={tab} onChange={setTab} />
 
           {tab === "feed" && <FeedSection />}
+          {tab === "status" && <StatusSection />}
           {tab === "ingest" && <IngestSection />}
           {tab === "compute" && <ComputeSection />}
           {tab === "export" && <ExportSection />}
+          {tab === "model" && <ModelSection />}
         </div>
       </Container>
     </div>

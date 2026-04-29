@@ -29,7 +29,9 @@
       "Bash(npm uninstall:*)",
       "Bash(docker exec:*)",
       "Bash(.venv/Scripts/python.exe -c ':*)",
-      "Bash(.venv/Scripts/python.exe -m jobs.run_once TSLA NVDA AAPL --max-items 50)"
+      "Bash(.venv/Scripts/python.exe -m jobs.run_once TSLA NVDA AAPL --max-items 50)",
+      "Bash(python -c \"from sqlalchemy import func; col = func.max\\(1\\); print\\(dir\\(col.desc\\(\\)\\)\\)\")",
+      "Bash(python -c \"from prices.alpaca_bars import PricePoint, get_batch_prices; print\\('alpaca_bars OK'\\)\")"
     ]
   }
 }

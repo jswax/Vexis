@@ -3,7 +3,7 @@
 
 CREATE TYPE job_status AS ENUM ('CREATED', 'RUNNING', 'SUCCEEDED', 'FAILED');
 CREATE TYPE asset_type AS ENUM ('STOCK', 'ETF', 'CRYPTO', 'INDEX', 'FX', 'COMMODITY', 'UNKNOWN');
-CREATE TYPE outcome_horizon AS ENUM ('M5', 'M15', 'H1', 'H4', 'D1');
+CREATE TYPE outcome_horizon AS ENUM ('M5', 'M15', 'M30', 'H1', 'H4', 'H6', 'D1');
 CREATE TYPE direction_label AS ENUM ('BULLISH', 'BEARISH', 'NEUTRAL');
 
 CREATE TABLE tweet_ingestion_jobs (

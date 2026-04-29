@@ -31,17 +31,14 @@ def main(
         print(f"[{_ts()}] ingest: no search terms provided — skipping", file=sys.stderr, flush=True)
     else:
         print(f"[{_ts()}] ingest: starting (max_items={max_items}, terms={terms})", flush=True)
-        Session = get_session_factory()
         q = IngestQuery(search_terms=terms, max_items=max_items)
-        with Session() as session:
-            result = run_ingest(session, q, source="run_once")
-            session.commit()
-            print(
-                f"[{_ts()}] ingest: done — {result.tweets_upserted} tweets, "
-                f"{result.asset_matches_created} asset matches, "
-                f"{result.features_upserted} features",
-                flush=True,
-            )
+        result = run_ingest(q, source="run_once")
+        print(
+            f"[{_ts()}] ingest: done — {result.tweets_upserted} tweets, "
+            f"{result.asset_matches_created} asset matches, "
+            f"{result.features_upserted} features",
+            flush=True,
+        )
 
     Session = get_session_factory()
     with Session() as session:

@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 
+/** Compute all can run many chunks and exceed default limits. */
+export const maxDuration = 300;
+
 const TWITTER_AI_URL =
   process.env.TWITTER_AI_URL || "http://localhost:4001";
+const TWITTERAI_TOKEN = process.env.TWITTERAI_TOKEN;
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     console.log("[twitterai] compute-outcomes request", body);
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (TWITTERAI_TOKEN) headers["x-twitterai-token"] = TWITTERAI_TOKEN;
     const res = await fetch(`${TWITTER_AI_URL}/api/twitter/compute-outcomes`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => null);
