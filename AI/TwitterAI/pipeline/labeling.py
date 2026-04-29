@@ -19,7 +19,20 @@ HORIZONS: list[dict] = [
     {"horizon": "D1",  "seconds": 24 * 60 * 60},
 ]
 
-DIRECTION_THRESHOLD = 0.002  # 20 bps dead-zone
+# Per-horizon thresholds: short horizons use lower thresholds because typical
+# intraday excess returns are smaller than daily ones. The same 20bps bar that's
+# easy to cross in a day is effectively noise over 5 minutes, so BEARISH/BULLISH
+# labels become very sparse at short horizons when using a flat threshold.
+HORIZON_THRESHOLDS: dict[str, float] = {
+    "M5":  0.001,   # 10 bps — 5-min excess moves rarely exceed 20bps
+    "M15": 0.001,   # 10 bps
+    "M30": 0.0015,  # 15 bps
+    "H1":  0.002,   # 20 bps (original default)
+    "H4":  0.002,   # 20 bps
+    "H6":  0.002,   # 20 bps
+    "D1":  0.003,   # 30 bps — daily moves should be substantial to be directional
+}
+DIRECTION_THRESHOLD = 0.002  # fallback for callers that don't pass horizon
 
 
 def compute_return(price0: float, price1: float) -> float:
@@ -96,13 +109,15 @@ def compute_impact_score(
 def compute_direction_label(
     excess_return: float | None,
     raw_return: float,
+    horizon: str | None = None,
 ) -> Literal["BULLISH", "BEARISH", "NEUTRAL"]:
+    threshold = HORIZON_THRESHOLDS.get(horizon, DIRECTION_THRESHOLD) if horizon else DIRECTION_THRESHOLD
     r = excess_return if excess_return is not None else raw_return
     if not math.isfinite(r):
         return "NEUTRAL"
-    if r >= DIRECTION_THRESHOLD:
+    if r >= threshold:
         return "BULLISH"
-    if r <= -DIRECTION_THRESHOLD:
+    if r <= -threshold:
         return "BEARISH"
     return "NEUTRAL"
 

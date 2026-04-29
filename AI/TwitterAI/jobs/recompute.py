@@ -82,7 +82,7 @@ def recompute_all(session: Session, limit: int | None = 500) -> RecomputeResult:
             market_open_flag=snap.market_open_flag if snap else None,
             session_type=snap.session_type if snap else None,
         )
-        direction = compute_direction_label(o.excess_return, o.raw_return)
+        direction = compute_direction_label(o.excess_return, o.raw_return, horizon=o.horizon)
 
         o.impact_score = impact_score
         o.direction_label = direction

@@ -386,6 +386,10 @@ class TrainRequest(BaseModel):
         default=1, ge=1,
         description="Minimum outcome rows per tweet to include in training",
     )
+    use_ticker_ohe: bool = Field(
+        default=True,
+        description="Include per-ticker one-hot features (NVDA, TSLA, etc.). Disable to test whether text/author signal generalises without ticker identity.",
+    )
 
 
 @app.post("/api/twitter/train")
@@ -409,6 +413,7 @@ def train_model(req: TrainRequest, _: None = Depends(_require_token)) -> dict:
             min_outcomes=req.min_outcomes,
             version=req.version,
             verbose=True,
+            use_ticker_ohe=req.use_ticker_ohe,
         )
         # Hot-reload the predictor — new ingests will use the updated model
         try:

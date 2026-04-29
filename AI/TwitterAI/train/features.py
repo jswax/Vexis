@@ -216,6 +216,7 @@ def extract_features(
     reply_count: int | None = None,
     view_count: int | None = None,
     created_at: datetime | None = None,
+    use_ticker_ohe: bool = True,
 ) -> dict[str, float]:
     """
     Extract a flat dict[str, float] of features for one (tweet × ticker) sample.
@@ -313,8 +314,9 @@ def extract_features(
     feats["match_is_direct"] = float(match_method == "direct_ticker")
     feats["match_is_alias"] = float(match_method not in ("cashtag", "direct_ticker") and bool(match_method))
 
-    for t_name in TOP_TICKERS_OHE:
-        feats[f"ticker_{t_name}"] = float(ticker_up == t_name)
+    if use_ticker_ohe:
+        for t_name in TOP_TICKERS_OHE:
+            feats[f"ticker_{t_name}"] = float(ticker_up == t_name)
 
     feats["ticker_in_text"] = float(ticker_up in t.upper() if ticker_up else False)
     feats["cashtag_of_ticker_in_text"] = float(

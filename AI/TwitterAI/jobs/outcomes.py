@@ -403,7 +403,7 @@ def _compute_outcomes_one_chunk(
                     market_open_flag=snap.market_open_flag,
                     session_type=snap.session_type,
                 )
-                direction      = compute_direction_label(excess_return, raw_return)
+                direction      = compute_direction_label(excess_return, raw_return, horizon=horizon)
 
                 outcome_rows.append(
                     {

@@ -204,6 +204,7 @@ class Predictor:
         n_tab = len(feature_names) - n_lsa
         tab_names = feature_names[:n_tab]
 
+        use_ticker_ohe: bool = (meta.get("use_ticker_ohe", True) is not False)
         tab_vec = features_to_vector(feature_dict, tab_names)
 
         # LSA text part
@@ -268,6 +269,9 @@ class Predictor:
             return []
 
         # Features are horizon-agnostic; each sub-model handles its own horizon.
+        _use_ohe: bool = (
+            (self._bundle.get("meta") or {}).get("use_ticker_ohe", True) is not False  # type: ignore[union-attr]
+        )
         base_feats = extract_features(
             text=text,
             username=username,
@@ -291,6 +295,7 @@ class Predictor:
             reply_count=reply_count,
             view_count=view_count,
             created_at=created_at,
+            use_ticker_ohe=_use_ohe,
         )
         base_feats["_raw_text"] = text  # type: ignore[assignment]
 
@@ -334,6 +339,9 @@ class Predictor:
         if not self._load():
             return None
 
+        _use_ohe2: bool = (
+            (self._bundle.get("meta") or {}).get("use_ticker_ohe", True) is not False  # type: ignore[union-attr]
+        )
         feats = extract_features(
             text=text,
             username=username,
@@ -357,6 +365,7 @@ class Predictor:
             reply_count=reply_count,
             view_count=view_count,
             created_at=created_at,
+            use_ticker_ohe=_use_ohe2,
         )
         feats["_raw_text"] = text  # type: ignore[assignment]
         return self._predict_single(feats, horizon)

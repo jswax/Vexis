@@ -459,12 +459,16 @@ function TweetCard({ tweet }: { tweet: TweetRow }) {
         >
           View →
         </a>
-        {tweet.outcomes.length > 0 && (
+        {(tweet.outcomes.length > 0 || (tweet.predictions ?? []).length > 0) && (
           <button
             onClick={() => setExpanded((e) => !e)}
             className="text-muted-foreground hover:text-foreground transition"
           >
-            {expanded ? "Hide outcomes ▲" : `Outcomes (${tweet.outcomes.length}) ▼`}
+            {expanded
+              ? "Hide ▲"
+              : tweet.outcomes.length > 0
+              ? `Outcomes (${tweet.outcomes.length}) ▼`
+              : `Predictions (${(tweet.predictions ?? []).length}) ▼`}
           </button>
         )}
       </div>
@@ -1673,9 +1677,18 @@ type ModelStatus = {
   trained_at?: string | null;
   cv_macro_f1?: number | null;
   cv_weighted_f1?: number | null;
+  test_macro_f1?: number | null;
+  train_samples?: number | null;
+  test_samples?: number | null;
   n_features?: number | null;
   class_distribution?: Record<string, number> | null;
   top_features?: Array<{ feature: string; importance: number }> | null;
+  per_horizon?: Record<string, {
+    cv_macro_f1: number | null;
+    train_samples: number | null;
+    class_distribution: Record<string, number> | null;
+    top_features: Array<{ feature: string; importance: number }> | null;
+  }> | null;
   reason?: string | null;
 };
 
@@ -1725,16 +1738,45 @@ function ModelStatusCard({
               </div>
             </div>
             <div className="rounded-xl border border-border bg-surface p-4">
-              <div className="text-xs text-muted-foreground">CV Weighted-F1</div>
-              <div className="text-xl font-semibold">
-                {status.cv_weighted_f1 != null ? (status.cv_weighted_f1 * 100).toFixed(1) + "%" : "—"}
+              <div className="text-xs text-muted-foreground">Test Macro-F1</div>
+              <div className={`text-xl font-semibold ${status.test_macro_f1 == null ? "text-muted-foreground" : (status.test_macro_f1 ?? 0) >= 0.5 ? "text-green-600" : "text-amber-600"}`}>
+                {status.test_macro_f1 != null ? (status.test_macro_f1 * 100).toFixed(1) + "%" : "—"}
               </div>
             </div>
             <div className="rounded-xl border border-border bg-surface p-4">
-              <div className="text-xs text-muted-foreground">Features</div>
+              <div className="text-xs text-muted-foreground">Features / Train rows</div>
               <div className="text-xl font-semibold">{status.n_features ?? "—"}</div>
+              {status.train_samples != null && (
+                <div className="text-xs text-muted-foreground mt-0.5">{status.train_samples.toLocaleString()} train</div>
+              )}
             </div>
           </div>
+
+          {/* Per-horizon CV F1 summary */}
+          {status.per_horizon && Object.keys(status.per_horizon).length > 0 && (
+            <div>
+              <div className="mb-2 text-xs font-semibold tracking-[0.22em] text-muted-foreground">PER-HORIZON CV MACRO-F1</div>
+              <div className="flex flex-wrap gap-2">
+                {["M5", "M15", "M30", "H1", "H4", "H6", "D1"].map((h) => {
+                  const hm = status.per_horizon![h];
+                  if (!hm) return null;
+                  const f1 = hm.cv_macro_f1;
+                  const bearish = hm.class_distribution?.BEARISH ?? 0;
+                  return (
+                    <div key={h} className="flex flex-col items-center rounded-xl border border-border bg-surface px-3 py-2 min-w-[60px]">
+                      <span className="text-[10px] font-semibold tracking-wide text-muted-foreground">{h}</span>
+                      <span className={`text-sm font-bold ${f1 == null ? "text-muted-foreground" : f1 >= 0.65 ? "text-green-600" : f1 >= 0.45 ? "text-amber-600" : "text-red-600"}`}>
+                        {f1 != null ? (f1 * 100).toFixed(0) + "%" : "—"}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground font-mono" title="BEARISH samples in training">
+                        ↓{bearish}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {status.trained_at && (
             <div className="text-xs text-muted-foreground">
@@ -1799,6 +1841,7 @@ function ModelStatusCard({
 function TrainCard({ onTrainComplete }: { onTrainComplete: () => void }) {
   const [version, setVersion] = useState("");
   const [minOutcomes, setMinOutcomes] = useState("50");
+  const [useTickerOhe, setUseTickerOhe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1831,6 +1874,7 @@ function TrainCard({ onTrainComplete }: { onTrainComplete: () => void }) {
       pollRef.current = window.setInterval(() => fetchLogs().catch(() => null), 1500);
       const body: Record<string, unknown> = {
         min_outcomes: parseInt(minOutcomes, 10) || 50,
+        use_ticker_ohe: useTickerOhe,
       };
       if (version.trim()) body.version = version.trim();
       const data = await post("/api/twitterai/train", body);
@@ -1874,6 +1918,21 @@ function TrainCard({ onTrainComplete }: { onTrainComplete: () => void }) {
               disabled={loading}
             />
           </Field>
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={useTickerOhe}
+              onChange={(e) => setUseTickerOhe(e.target.checked)}
+              disabled={loading}
+              className="h-4 w-4 rounded border-border"
+            />
+            Include ticker one-hot features (NVDA, TSLA…)
+          </label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Uncheck to train without per-ticker identity features — isolates whether text and author signal generalises across market regimes.
+          </p>
         </div>
         <ErrorBox msg={error} />
         <div>
@@ -1999,10 +2058,9 @@ function BackfillCard({ onComplete }: { onComplete: () => void }) {
           <div className="mb-3 text-xs font-semibold text-green-700">Backfill complete</div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
             {[
-              { label: "Tweets processed", val: r.tweets_processed },
+              { label: "Tweets processed", val: r.processed },
               { label: "Predictions created", val: r.predictions_created },
-              { label: "Skipped (no model)", val: r.skipped_no_model },
-              { label: "Errors", val: r.errors },
+              { label: "Model version", val: r.model_version },
             ].map(({ label, val }) =>
               val != null ? (
                 <div key={label} className="flex flex-col">

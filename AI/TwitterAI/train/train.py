@@ -238,6 +238,7 @@ def build_feature_matrix(
     svd: TruncatedSVD | None = None,
     fit: bool = True,
     verbose: bool = True,
+    use_ticker_ohe: bool = True,
 ) -> tuple[np.ndarray, list[str], TfidfVectorizer, TruncatedSVD]:
     if verbose:
         log(f"[train] Extracting tabular features from {len(rows):,} rows...")
@@ -266,6 +267,7 @@ def build_feature_matrix(
             reply_count=r["reply_count"],
             view_count=r["view_count"],
             created_at=r["created_at"],
+            use_ticker_ohe=use_ticker_ohe,
         )
         for r in rows
     ]
@@ -444,6 +446,7 @@ def run_training(
     version: str = MODEL_VERSION,
     output_dir: Path = MODELS_DIR,
     verbose: bool = True,
+    use_ticker_ohe: bool = True,
 ) -> dict:
     t_start = time.perf_counter()
 
@@ -497,10 +500,10 @@ def run_training(
 
     # Fit text transformers on TRAIN only (no test data leakage)
     X_train, feature_names, tfidf, svd = build_feature_matrix(
-        rows_train, texts_train, fit=True, verbose=verbose
+        rows_train, texts_train, fit=True, verbose=verbose, use_ticker_ohe=use_ticker_ohe
     )
     X_test, _, _, _ = build_feature_matrix(
-        rows_test, texts_test, tfidf=tfidf, svd=svd, fit=False, verbose=False
+        rows_test, texts_test, tfidf=tfidf, svd=svd, fit=False, verbose=False, use_ticker_ohe=use_ticker_ohe
     )
 
     # Train one model per horizon
@@ -586,6 +589,7 @@ def run_training(
         "total_train_samples": len(rows_train),
         "total_test_samples": len(rows_test),
         "n_features": len(feature_names),
+        "use_ticker_ohe": use_ticker_ohe,
         "class_distribution": {
             DIRECTION_LABELS[int(cls)]: int(cnt)
             for cls, cnt in zip(*np.unique(y_train, return_counts=True))
