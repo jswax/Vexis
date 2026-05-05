@@ -157,6 +157,13 @@ class IngestRequest(BaseModel):
 
 @app.post("/api/twitter/ingest", response_model=None)
 def ingest(req: IngestRequest, _: None = Depends(_require_token)):
+    global _ingest_running
+    if _ingest_running:
+        raise HTTPException(status_code=409, detail="Ingest already in progress")
+    if not _ingest_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Ingest lock is held")
+    _ingest_running = True
+
     # QQQ-first defaults: if user doesn't specify, make QQQ the normal ingest target.
     from pipeline.qqq_ingest_profile import DEFAULT_QQQ_HANDLES, DEFAULT_QQQ_SEARCH_TERMS
 
@@ -186,7 +193,12 @@ def ingest(req: IngestRequest, _: None = Depends(_require_token)):
     )
     label = req.source_label or "qqq:api:/api/twitter/ingest"
     if req.background:
-        job_id = start_background_ingest(q, source="api", source_label=label)
+        def _bg_done() -> None:
+            global _ingest_running
+            _ingest_running = False
+            _ingest_lock.release()
+
+        job_id = start_background_ingest(q, source="api", source_label=label, on_done=_bg_done)
         log(f"[{__name__}] ingest accepted (background) job_id={job_id}")
         return JSONResponse(
             status_code=202,
@@ -199,7 +211,11 @@ def ingest(req: IngestRequest, _: None = Depends(_require_token)):
             },
         )
 
-    result = run_ingest(q, source="api", source_label=label)
+    try:
+        result = run_ingest(q, source="api", source_label=label)
+    finally:
+        _ingest_running = False
+        _ingest_lock.release()
     log(
         f"[{__name__}] ingest done (items_received={result.items_received}, "
         f"items_normalized={result.items_normalized}, tweets_upserted={result.tweets_upserted}, "
@@ -378,6 +394,10 @@ def model_status() -> dict:
 # Global lock: only one training run at a time
 _training_lock = threading.Lock()
 _training_state: dict = {"running": False, "last_result": None}
+
+# Global lock: only one ingest at a time
+_ingest_lock = threading.Lock()
+_ingest_running = False
 
 
 class TrainRequest(BaseModel):

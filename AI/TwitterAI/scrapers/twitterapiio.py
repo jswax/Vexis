@@ -136,11 +136,6 @@ def _collect_search(
         first = False
         tweets, has_next, cursor = _search_page(query, query_type, cursor, api_key, session)
         collected.extend(tweets)
-        if len(collected) and (len(collected) % 25 == 0 or not has_next or not cursor):
-            print(
-                f"[{_ts()}] twitterapi.io: {query_type} collected {len(collected)}/{limit}",
-                flush=True,
-            )
         if not has_next or not cursor:
             break
     return collected[:limit]
@@ -177,6 +172,7 @@ def run_ingest(q: IngestQuery, session: requests.Session | None = None) -> RunRe
         all_queries.append(built_q)
         print(f"[{_ts()}] twitterapi.io: searching ({qt}) {built_q}", flush=True)
         items = _collect_search(built_q, qt, per_query_limit, api_key, sess)
+        print(f"  collected {len(items)}", flush=True)
         for item in items:
             if len(collected) >= q.max_items:
                 return

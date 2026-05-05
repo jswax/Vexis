@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -418,6 +419,7 @@ def start_background_ingest(
     *,
     source: str = "api",
     source_label: str | None = None,
+    on_done: Callable[[], None] | None = None,
 ) -> str:
     job_id = _create_and_commit_running_job(query, source=source, source_label=source_label)
 
@@ -444,6 +446,9 @@ def start_background_ingest(
                         session.commit()
             except Exception as exc2:
                 log(f"[{ts()}] could not persist FAILED for job={job_id}: {exc2!r}")
+        finally:
+            if on_done is not None:
+                on_done()
 
     threading.Thread(target=worker, daemon=True).start()
     return job_id
