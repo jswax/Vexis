@@ -25,16 +25,18 @@ class Settings(BaseSettings):
     # When set, POST endpoints that mutate state require header `x-twitterai-token`.
     twitterai_token: str = Field(default="", validation_alias="TWITTERAI_TOKEN")
 
-    # twitterapi.io
-    twitter_api_io_key: str = Field(default="", validation_alias="TWITTER_API_IO_KEY")
-    # Seconds between advanced_search requests (pagination + multi-query). Default 5.1 ~ free-tier 1 req/5s.
-    # Set to 0 on a paid plan that allows faster pacing (watch for 429s).
-    twitter_api_io_request_delay_s: float = Field(
-        default=5.1,
-        validation_alias="TWITTER_API_IO_REQUEST_DELAY_S",
-    )
+    # Apify
+    apify_token: str = Field(default="", validation_alias="APIFY_TOKEN")
     # When false, ingest skips loading the ML model and writing tweet_predictions (faster; run backfill later).
     ingest_predictions: bool = Field(default=True, validation_alias="TWITTERAI_INGEST_PREDICTIONS")
+    # Split [start,end] into windows of N calendar days and run Apify once per window so "Latest" is not
+    # dominated by the last minutes. Set 0 for one actor run (old behavior — mostly "right now").
+    ingest_date_shard_days: int = Field(
+        default=5,
+        ge=0,
+        le=60,
+        validation_alias="TWITTERAI_INGEST_DATE_SHARD_DAYS",
+    )
 
     # Alpaca
     market_data_provider: str = Field(default="none", validation_alias="MARKET_DATA_PROVIDER")

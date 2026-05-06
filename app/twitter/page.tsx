@@ -595,8 +595,9 @@ function FeedSection() {
   const [tickerFilter, setTickerFilter] = useState("");
   const [qqqMode, setQqqMode] = useState(true);
   const [section, setSection] = useState<
-    "all" | "uncomputed" | "impact_1_5" | "impact_5_8" | "impact_8_10"
+    "all" | "uncomputed" | "impact_1_5" | "impact_5_8" | "impact_8_10" | "most_recent"
   >("all");
+  const currentSortRef = useRef<"default" | "recent">("default");
   const LIMIT = 20;
 
   function maxAbsImpact(t: TweetRow): number {
@@ -609,7 +610,7 @@ function FeedSection() {
   function inSection(t: TweetRow): boolean {
     const max = maxAbsImpact(t);
     const computed = t.outcomes.length > 0;
-    if (section === "all") return true;
+    if (section === "all" || section === "most_recent") return true;
     if (section === "uncomputed") return !computed;
     if (!computed) return false;
     if (section === "impact_1_5") return max >= 1 && max < 5;
@@ -621,7 +622,7 @@ function FeedSection() {
   const filteredTweets = tweets.filter(inSection);
 
   const load = useCallback(
-    async (reset: boolean) => {
+    async (reset: boolean, sort: "default" | "recent" = "default") => {
       setLoading(true);
       setError(null);
       const nextOffset = reset ? 0 : offset;
@@ -629,6 +630,7 @@ function FeedSection() {
         const params = new URLSearchParams({ limit: String(LIMIT), offset: String(nextOffset) });
         if (tickerFilter) params.set("ticker", tickerFilter);
         if (qqqMode) params.set("qqq", "1");
+        if (sort === "recent") params.set("sort", "recent");
         const res = await fetch(`/api/twitterai/tweets?${params.toString()}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
@@ -703,6 +705,21 @@ function FeedSection() {
       .finally(() => setLoading(false));
   }
 
+  function handleSectionChange(id: typeof section) {
+    const newSort = id === "most_recent" ? "recent" : "default";
+    const sortChanged = newSort !== currentSortRef.current;
+    currentSortRef.current = newSort;
+    setSection(id);
+    if (sortChanged) {
+      setTweets([]);
+      setOffset(0);
+      setHasMore(true);
+      setTotal(null);
+      setSectionTotals(null);
+      load(true, newSort);
+    }
+  }
+
   return (
     <div className="grid gap-4">
       <div className="flex items-center gap-3">
@@ -759,7 +776,7 @@ function FeedSection() {
           </button>
         )}
         <button
-          onClick={() => load(true)}
+          onClick={() => load(true, currentSortRef.current)}
           disabled={loading}
           className="ml-auto text-sm text-muted-foreground hover:text-foreground disabled:opacity-40"
         >
@@ -779,6 +796,7 @@ function FeedSection() {
         {(
           [
             { id: "all", label: "All", count: total ?? tweets.length },
+            { id: "most_recent", label: "Most Recent", count: total ?? tweets.length },
             { id: "uncomputed", label: "Not computed", count: sectionTotals?.uncomputed ?? 0 },
             { id: "impact_1_5", label: "|impact| 1–5", count: sectionTotals?.impact_1_5 ?? 0 },
             { id: "impact_5_8", label: "|impact| 5–8", count: sectionTotals?.impact_5_8 ?? 0 },
@@ -788,7 +806,7 @@ function FeedSection() {
           <button
             key={s.id}
             type="button"
-            onClick={() => setSection(s.id)}
+            onClick={() => handleSectionChange(s.id)}
             className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
               section === s.id
                 ? "border-foreground/20 bg-foreground/5 text-foreground"
@@ -825,7 +843,7 @@ function FeedSection() {
 
       {!loading && hasMore && tweets.length > 0 && (
         <div className="flex justify-center">
-          <button onClick={() => load(false)} className={secondaryBtnCls}>
+          <button onClick={() => load(false, currentSortRef.current)} className={secondaryBtnCls}>
             Load more
           </button>
         </div>
@@ -951,6 +969,10 @@ type IngestResult = {
   authors_upserted?: number;
   asset_matches_created?: number;
   features_upserted?: number;
+  /** Relative to AI/TwitterAI/, written when ingest normalizes ≥1 tweet. */
+  scrape_export_relpath?: string;
+  /** Absolute path when known (sync ingest). */
+  scrape_export_path?: string | null;
 };
 
 function ingestPollSleep(ms: number) {
@@ -991,6 +1013,14 @@ function IngestResultCard({ data }: { data: unknown }) {
           </div>
         ))}
       </div>
+      {(r.scrape_export_relpath || r.scrape_export_path) ? (
+        <p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">
+          Tweet + posted time manifest:{" "}
+          <span className="text-foreground">
+            {r.scrape_export_path ?? r.scrape_export_relpath}
+          </span>
+        </p>
+      ) : null}
       {stats.length === 1 && stats[0]?.label === "Items received" ? (
         <p className="mt-3 text-xs text-muted-foreground">
           Detailed upsert counts are available after synchronous ingest, or in the database / Status
@@ -1012,6 +1042,8 @@ function IngestSection() {
   const [onlyVerified, setOnlyVerified] = useState(PRESETS[0].onlyVerified);
   const [minRetweets, setMinRetweets] = useState("");
   const [minFavs, setMinFavs] = useState("");
+  /** Empty = server default (usually 5). 0 = one Apify run (“only today”). */
+  const [dateShardDays, setDateShardDays] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<unknown>(null);
@@ -1054,6 +1086,12 @@ function IngestSection() {
       if (onlyVerified) body.only_verified_users = true;
       if (minRetweets) body.minimum_retweets = parseInt(minRetweets, 10);
       if (minFavs) body.minimum_favorites = parseInt(minFavs, 10);
+      if (dateShardDays.trim() !== "") {
+        const ds = parseInt(dateShardDays.trim(), 10);
+        if (Number.isFinite(ds) && ds >= 0 && ds <= 60) {
+          body.date_shard_days = ds;
+        }
+      }
 
       const res = await fetch("/api/twitterai/ingest", {
         method: "POST",
@@ -1101,9 +1139,13 @@ function IngestSection() {
           }
           const itemsReceived =
             typeof rawReceived === "number" ? rawReceived : Number(rawReceived);
+          const scrapeRelRaw = (raw as Record<string, unknown> | null)?.scrape_export_relpath;
+          const scrapeRel =
+            typeof scrapeRelRaw === "string" && scrapeRelRaw.trim() ? scrapeRelRaw.trim() : undefined;
           setResult({
             job_id: jobId,
             items_received: Number.isFinite(itemsReceived) ? itemsReceived : undefined,
+            ...(scrapeRel ? { scrape_export_relpath: scrapeRel } : {}),
           });
           return;
         }
@@ -1224,7 +1266,22 @@ function IngestSection() {
               onChange={(e) => setEnd(e.target.value)}
             />
           </Field>
+          <Field label="Date shard days">
+            <input
+              type="number"
+              className={inputCls}
+              value={dateShardDays}
+              min={0}
+              max={60}
+              onChange={(e) => setDateShardDays(e.target.value)}
+              placeholder="default 5"
+            />
+          </Field>
         </div>
+        <p className="-mt-2 text-[11px] text-muted-foreground">
+          Shards split <code className="rounded bg-muted px-1">start</code>→<code className="rounded bg-muted px-1">end</code> into N‑day windows (several Apify runs) so results are not all from “right now.” Use{" "}
+          <strong>0</strong> for a single fast run (mostly recent tweets only).
+        </p>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Min retweets">

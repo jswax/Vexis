@@ -60,9 +60,6 @@ def _utc(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-_EXPECTED_OUTCOMES_PER_TICKER = len(HORIZONS)
-
-
 def _ordered_tweet_ids_for_compute(
     session: Session,
     limit: int,
@@ -72,13 +69,14 @@ def _ordered_tweet_ids_for_compute(
     candidate_cap: int | None = None,
 ) -> list[str]:
     """
-    Tweet IDs to run through the Alpaca labeling loop.
+    Tweet IDs that still need outcome computation, found entirely in SQL.
 
-    When force=False: tweets that have at least one QQQ-allowed match and, for
-    every such ticker on that tweet, fewer than len(HORIZONS) outcome rows.
-    This backfills partial grids (e.g. only M5+D1 from an older run) which would
-    otherwise never be selected because the tweet already had some outcomes.
+    A tweet is "incomplete" when any of its QQQ-allowed tickers has fewer than
+    len(HORIZONS) outcome rows (including sentinel rows written for no-price
+    horizons). This is checked via a subquery join — no Python-side filtering.
     """
+    from sqlalchemy import func
+
     if force:
         return list(
             session.execute(
@@ -89,59 +87,45 @@ def _ordered_tweet_ids_for_compute(
             ).scalars().all()
         )
 
-    if candidate_cap is None:
-        overfetch = min(max(limit * 25, limit), 3000)
-    else:
-        overfetch = max(limit * 25, min(int(candidate_cap), 500_000))
-    candidate_ids = list(
+    n_horizons = len(HORIZONS)
+
+    # Per (tweet_id, ticker): how many outcome rows exist already
+    outcome_count_sq = (
+        select(
+            TweetOutcome.tweet_id,
+            TweetOutcome.ticker,
+            func.count().label("cnt"),
+        )
+        .group_by(TweetOutcome.tweet_id, TweetOutcome.ticker)
+        .subquery()
+    )
+
+    match_cond = TweetAssetMatch.ticker.in_(list(_QQQ_ALLOWED)) if qqq_only else True
+
+    # tweet_ids where at least one ticker is missing outcome rows
+    incomplete_sq = (
+        select(TweetAssetMatch.tweet_id.label("tweet_id"))
+        .outerjoin(
+            outcome_count_sq,
+            (TweetAssetMatch.tweet_id == outcome_count_sq.c.tweet_id)
+            & (TweetAssetMatch.ticker == outcome_count_sq.c.ticker),
+        )
+        .where(match_cond)
+        .where(
+            (outcome_count_sq.c.cnt.is_(None)) | (outcome_count_sq.c.cnt < n_horizons)
+        )
+        .distinct()
+        .subquery()
+    )
+
+    return list(
         session.execute(
             select(Tweet.id)
-            .where(Tweet.id.in_(select(TweetAssetMatch.tweet_id)))
+            .where(Tweet.id.in_(select(incomplete_sq.c.tweet_id)))
             .order_by(Tweet.created_at_twitter.desc())
-            .limit(overfetch)
+            .limit(limit)
         ).scalars().all()
     )
-    if not candidate_ids:
-        return []
-
-    matches_all = (
-        session.execute(
-            select(TweetAssetMatch).where(TweetAssetMatch.tweet_id.in_(candidate_ids))
-        )
-        .scalars()
-        .all()
-    )
-    outcomes_all = (
-        session.execute(
-            select(TweetOutcome).where(TweetOutcome.tweet_id.in_(candidate_ids))
-        )
-        .scalars()
-        .all()
-    )
-
-    allowed_by_tweet: dict[str, set[str]] = {}
-    for m in matches_all:
-        tk = (m.ticker or "").upper()
-        if qqq_only and tk not in _QQQ_ALLOWED:
-            continue
-        allowed_by_tweet.setdefault(m.tweet_id, set()).add(tk)
-
-    pair_counts: dict[tuple[str, str], int] = {}
-    for o in outcomes_all:
-        pair_counts[(o.tweet_id, (o.ticker or "").upper())] = (
-            pair_counts.get((o.tweet_id, (o.ticker or "").upper()), 0) + 1
-        )
-
-    selected: list[str] = []
-    for tid in candidate_ids:
-        allowed = allowed_by_tweet.get(tid, set())
-        if not allowed:
-            continue
-        if any(pair_counts.get((tid, tk), 0) < _EXPECTED_OUTCOMES_PER_TICKER for tk in allowed):
-            selected.append(tid)
-        if len(selected) >= limit:
-            break
-    return selected
 
 
 def _compute_outcomes_one_chunk(
@@ -150,10 +134,10 @@ def _compute_outcomes_one_chunk(
     *,
     qqq_only: bool,
     force: bool,
-    candidate_cap: int | None,
+    candidate_cap: int | None = None,
 ) -> OutcomeResult:
     tweet_ids = _ordered_tweet_ids_for_compute(
-        session, limit, qqq_only=qqq_only, force=force, candidate_cap=candidate_cap
+        session, limit, qqq_only=qqq_only, force=force
     )
     if not tweet_ids:
         return OutcomeResult("alpaca", 0, 0, 0, 0, 0, 0)
@@ -344,7 +328,24 @@ def _compute_outcomes_one_chunk(
             )
 
             if snap is None:
-                log(f"[{log_ts()}]   [{i}/{total}] {ticker} — no base price")
+                # No base price — write sentinels for all horizons so this
+                # (tweet, ticker) pair is permanently marked complete.
+                for h in HORIZONS:
+                    outcome_rows.append({
+                        "id": _new_id(),
+                        "tweet_id": tweet.id,
+                        "ticker": ticker,
+                        "horizon": h["horizon"],
+                        "price_at_tweet": None,
+                        "price_at_horizon": None,
+                        "raw_return": None,
+                        "benchmark_return": None,
+                        "excess_return": None,
+                        "expected_volatility": None,
+                        "vol_adjusted_return": None,
+                        "impact_score": 0,
+                        "direction_label": "NEUTRAL",
+                    })
                 errors += 1
                 continue
 
@@ -377,7 +378,25 @@ def _compute_outcomes_one_chunk(
                 price_at_horizon = horizon_pps[h_idx]
 
                 if price_at_horizon is None:
-                    # No usable later print inside the fetched bar window.
+                    # No future price bar — write a sentinel so this horizon
+                    # slot is permanently filled. Without this the tweet loops
+                    # forever because the completion check requires len(HORIZONS)
+                    # rows per ticker.
+                    outcome_rows.append({
+                        "id": _new_id(),
+                        "tweet_id": tweet.id,
+                        "ticker": ticker,
+                        "horizon": horizon,
+                        "price_at_tweet": snap.price,
+                        "price_at_horizon": None,
+                        "raw_return": None,
+                        "benchmark_return": None,
+                        "excess_return": None,
+                        "expected_volatility": None,
+                        "vol_adjusted_return": None,
+                        "impact_score": 0,
+                        "direction_label": "NEUTRAL",
+                    })
                     continue
 
                 raw_return = compute_return(snap.price, price_at_horizon.price)
@@ -465,8 +484,7 @@ def compute_for_unprocessed(
     qqq_only: bool = True,
     force: bool = False,
     run_all: bool = False,
-    chunk_size: int = 80,
-    candidate_cap_run_all: int = 400_000,
+    chunk_size: int = 200,
 ) -> OutcomeResult:
     """
     Compute outcomes for tweets with matches. By default (run_all=False), process
@@ -474,9 +492,8 @@ def compute_for_unprocessed(
     horizons per allowed ticker).
 
     When run_all=True, repeat internal batches of ``chunk_size`` until no such
-    tweets remain (scans up to ``candidate_cap_run_all`` newest matched tweets
-    per batch to find work). Already-complete tweets are not recomputed unless
-    force=True (not exposed on the public API today).
+    tweets remain. Already-complete tweets (including those with sentinel rows
+    for no-price horizons) are skipped unless force=True.
     """
     if not run_all:
         r = _compute_outcomes_one_chunk(
@@ -494,7 +511,7 @@ def compute_for_unprocessed(
             chunks_completed=1 if r.scanned else 0,
         )
 
-    eff_chunk = max(20, min(int(chunk_size), 250))
+    eff_chunk = max(20, min(int(chunk_size), 500))
     agg = OutcomeResult("alpaca", 0, 0, 0, 0, 0, 0)
     n_chunks = 0
     max_chunks = 10_000
@@ -504,7 +521,7 @@ def compute_for_unprocessed(
             eff_chunk,
             qqq_only=qqq_only,
             force=force,
-            candidate_cap=candidate_cap_run_all,
+            candidate_cap=None,
         )
         if r.scanned == 0:
             break

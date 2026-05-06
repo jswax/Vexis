@@ -196,9 +196,9 @@ class TweetOutcome(Base):
     horizon: Mapped[str] = mapped_column(
         Enum("M5", "M15", "M30", "H1", "H4", "H6", "D1", name="outcome_horizon"), nullable=False
     )
-    price_at_tweet: Mapped[float] = mapped_column(Float, nullable=False)
-    price_at_horizon: Mapped[float] = mapped_column(Float, nullable=False)
-    raw_return: Mapped[float] = mapped_column(Float, nullable=False)
+    price_at_tweet: Mapped[Optional[float]] = mapped_column(Float)
+    price_at_horizon: Mapped[Optional[float]] = mapped_column(Float)
+    raw_return: Mapped[Optional[float]] = mapped_column(Float)
     benchmark_return: Mapped[Optional[float]] = mapped_column(Float)
     excess_return: Mapped[Optional[float]] = mapped_column(Float)
     expected_volatility: Mapped[Optional[float]] = mapped_column(Float)

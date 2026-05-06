@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
     if (sp.get("ticker")) params.set("ticker", sp.get("ticker")!);
     if (sp.get("qqq")) params.set("qqq", sp.get("qqq")!);
     if (sp.get("test_only")) params.set("test_only", sp.get("test_only")!);
+    if (sp.get("sort")) params.set("sort", sp.get("sort")!);
 
     const res = await fetch(
       `${TWITTER_AI_URL}/api/twitter/tweets?${params.toString()}`

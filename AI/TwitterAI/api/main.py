@@ -23,8 +23,12 @@ from log_buffer import clear as clear_logs
 from log_buffer import get_lines as get_log_lines
 from log_buffer import log
 from log_buffer import ts
-from scrapers.ingest import run as run_ingest, start_background_ingest
-from scrapers.twitterapiio import IngestQuery
+from scrapers.ingest import (
+    run as run_ingest,
+    scrape_export_relpath,
+    start_background_ingest,
+)
+from scrapers.apify_twitter import IngestQuery
 from train.export import build_rows, export_jsonl
 
 app = FastAPI(title="TwitterAI", version="0.1.0")
@@ -148,6 +152,8 @@ class IngestRequest(BaseModel):
     only_verified_users: bool = False
     start: str | None = None
     end: str | None = None
+    # Override TWITTERAI_INGEST_DATE_SHARD_DAYS: 0 = single run; 3–7 spreads tweets across [start,end].
+    date_shard_days: int | None = Field(default=None, ge=0, le=60)
     source_label: str | None = None
     background: bool = Field(
         default=True,
@@ -178,6 +184,10 @@ def ingest(req: IngestRequest, _: None = Depends(_require_token)):
         f"terms={len(search_terms)}, handles={len(twitter_handles)}, convs={len(req.conversation_ids)})"
     )
 
+    # Default start to 30 days ago so ingest always has a meaningful window.
+    from datetime import timedelta
+    effective_start = req.start or (datetime.now(tz=timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+
     q = IngestQuery(
         search_terms=search_terms,
         twitter_handles=twitter_handles,
@@ -188,8 +198,9 @@ def ingest(req: IngestRequest, _: None = Depends(_require_token)):
         minimum_retweets=req.minimum_retweets,
         minimum_favorites=req.minimum_favorites,
         only_verified_users=req.only_verified_users,
-        start=req.start,
+        start=effective_start,
         end=req.end,
+        date_shard_days=req.date_shard_days,
     )
     label = req.source_label or "qqq:api:/api/twitter/ingest"
     if req.background:
@@ -206,8 +217,10 @@ def ingest(req: IngestRequest, _: None = Depends(_require_token)):
                 "accepted": True,
                 "background": True,
                 "job_id": job_id,
+                "scrape_export_relpath": scrape_export_relpath(job_id),
                 "message": "Ingest running in the background. Poll GET /api/twitter/status until "
-                "last_ingest_job.id matches and status is SUCCEEDED or FAILED.",
+                "last_ingest_job.id matches and status is SUCCEEDED or FAILED. "
+                "If normalization yields tweets, scrape_export_relpath is written under AI/TwitterAI/.",
             },
         )
 
@@ -232,6 +245,8 @@ def ingest(req: IngestRequest, _: None = Depends(_require_token)):
         "asset_matches_created": result.asset_matches_created,
         "features_upserted": result.features_upserted,
         "predictions_created": result.predictions_created,
+        "scrape_export_relpath": scrape_export_relpath(result.job_id),
+        "scrape_export_path": result.scrape_export_path,
     }
 
 
@@ -467,10 +482,12 @@ def backfill_predictions(req: BackfillRequest, _: None = Depends(_require_token)
     Run model inference on existing tweets that have no predictions yet
     (e.g. tweets ingested before the model was trained).
     """
-    from sqlalchemy import select, func
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    import uuid
+
+    from sqlalchemy import select
     from db.models import TweetAssetMatch, TweetFeatures, TweetPrediction, TwitterAuthor
     from inference.model import get_predictor
+    from scrapers.ingest import PREDICTION_UPSERT_CHUNK, flush_prediction_rows_batch
 
     predictor = get_predictor()
     if not predictor.is_ready:
@@ -525,6 +542,13 @@ def backfill_predictions(req: BackfillRequest, _: None = Depends(_require_token)
 
         processed = 0
         predictions_created = 0
+        pred_buf: list[dict] = []
+
+        def _flush_preds() -> None:
+            nonlocal predictions_created
+            if pred_buf:
+                predictions_created += flush_prediction_rows_batch(session, pred_buf)
+                pred_buf.clear()
 
         for tweet in tweets:
             author = author_map.get(tweet.author_id)
@@ -561,41 +585,31 @@ def backfill_predictions(req: BackfillRequest, _: None = Depends(_require_token)
                         created_at=tweet.created_at_twitter,
                     )
                     for hp in horizon_preds:
-                        stmt2 = (
-                            pg_insert(TweetPrediction)
-                            .values(
-                                id=str(__import__("uuid").uuid4()),
-                                tweet_id=tweet.id,
-                                ticker=m.ticker,
-                                horizon=hp.horizon,
-                                model_version=hp.model_version,
-                                direction_pred=hp.direction,
-                                bullish_prob=hp.bullish_prob,
-                                bearish_prob=hp.bearish_prob,
-                                neutral_prob=hp.neutral_prob,
-                                confidence=hp.confidence,
-                            )
-                            .on_conflict_do_update(
-                                index_elements=[
-                                    "tweet_id", "ticker", "horizon", "model_version"
-                                ],
-                                set_={
-                                    "direction_pred": hp.direction,
-                                    "bullish_prob": hp.bullish_prob,
-                                    "bearish_prob": hp.bearish_prob,
-                                    "neutral_prob": hp.neutral_prob,
-                                    "confidence": hp.confidence,
-                                },
-                            )
+                        pred_buf.append(
+                            {
+                                "id": str(uuid.uuid4()),
+                                "tweet_id": tweet.id,
+                                "ticker": m.ticker,
+                                "horizon": hp.horizon,
+                                "model_version": hp.model_version,
+                                "direction_pred": hp.direction,
+                                "bullish_prob": hp.bullish_prob,
+                                "bearish_prob": hp.bearish_prob,
+                                "neutral_prob": hp.neutral_prob,
+                                "confidence": hp.confidence,
+                            }
                         )
-                        r = session.execute(stmt2)
-                        predictions_created += r.rowcount
                 except Exception:
                     pass
+
+                if len(pred_buf) >= PREDICTION_UPSERT_CHUNK:
+                    _flush_preds()
 
             processed += 1
             if processed % 50 == 0:
                 log(f"[{ts()}] backfill-predictions: {processed}/{len(tweets)}")
+
+        _flush_preds()
 
         session.commit()
 
@@ -617,10 +631,12 @@ class PredictRequest(BaseModel):
 @app.post("/api/twitter/predict")
 def predict_tweet(req: PredictRequest, _: None = Depends(_require_token)) -> dict:
     """Run model inference for a single tweet already in the DB."""
+    import uuid
+
     from sqlalchemy import select
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from db.models import TweetAssetMatch, TweetFeatures, TweetPrediction, TwitterAuthor
+    from db.models import TweetAssetMatch, TweetFeatures, TwitterAuthor
     from inference.model import get_predictor
+    from scrapers.ingest import flush_prediction_rows_batch
 
     predictor = get_predictor()
     if not predictor.is_ready:
@@ -652,6 +668,7 @@ def predict_tweet(req: PredictRequest, _: None = Depends(_require_token)) -> dic
         )
 
         all_preds: list[dict] = []
+        rows: list[dict] = []
         for m in matches:
             horizon_preds = predictor.predict_all_horizons(
                 text=tweet.text or "",
@@ -678,35 +695,24 @@ def predict_tweet(req: PredictRequest, _: None = Depends(_require_token)) -> dic
                 created_at=tweet.created_at_twitter,
             )
             for hp in horizon_preds:
-                stmt = (
-                    pg_insert(TweetPrediction)
-                    .values(
-                        id=str(__import__("uuid").uuid4()),
-                        tweet_id=tweet.id,
-                        ticker=m.ticker,
-                        horizon=hp.horizon,
-                        model_version=hp.model_version,
-                        direction_pred=hp.direction,
-                        bullish_prob=hp.bullish_prob,
-                        bearish_prob=hp.bearish_prob,
-                        neutral_prob=hp.neutral_prob,
-                        confidence=hp.confidence,
-                    )
-                    .on_conflict_do_update(
-                        index_elements=[
-                            "tweet_id", "ticker", "horizon", "model_version"
-                        ],
-                        set_={
-                            "direction_pred": hp.direction,
-                            "bullish_prob": hp.bullish_prob,
-                            "bearish_prob": hp.bearish_prob,
-                            "neutral_prob": hp.neutral_prob,
-                            "confidence": hp.confidence,
-                        },
-                    )
+                rows.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "tweet_id": tweet.id,
+                        "ticker": m.ticker,
+                        "horizon": hp.horizon,
+                        "model_version": hp.model_version,
+                        "direction_pred": hp.direction,
+                        "bullish_prob": hp.bullish_prob,
+                        "bearish_prob": hp.bearish_prob,
+                        "neutral_prob": hp.neutral_prob,
+                        "confidence": hp.confidence,
+                    }
                 )
-                session.execute(stmt)
                 all_preds.append({"ticker": m.ticker, **hp.to_dict()})
+
+        if rows:
+            flush_prediction_rows_batch(session, rows)
 
         session.commit()
 
@@ -726,6 +732,7 @@ def list_tweets(
     ticker: str | None = None,
     qqq: bool = False,
     test_only: bool = False,
+    sort: str = "default",
 ) -> dict[str, Any]:
     from sqlalchemy import case, func, select
     from db.models import TweetAssetMatch, TweetFeatures, TweetOutcome, TweetPrediction, TwitterAuthor
@@ -820,20 +827,25 @@ def list_tweets(
         }
 
         eff_limit = min(limit, 500 if test_only else 100)
-        stmt = (
-            select(Tweet)
-            .outerjoin(max_impact_sq, Tweet.id == max_impact_sq.c.tweet_id)
-            .order_by(
-                # Computed tweets (have outcomes) first, then uncomputed
-                case((max_impact_sq.c.max_abs_impact.is_(None), 1), else_=0),
-                # Among computed: highest |impact_score| first
-                max_impact_sq.c.max_abs_impact.desc().nullslast(),
-                # Among uncomputed: newest first
-                Tweet.created_at_twitter.desc(),
+        if sort == "recent":
+            stmt = (
+                select(Tweet)
+                .order_by(Tweet.scraped_at.desc())
+                .limit(eff_limit)
+                .offset(offset)
             )
-            .limit(eff_limit)
-            .offset(offset)
-        )
+        else:
+            stmt = (
+                select(Tweet)
+                .outerjoin(max_impact_sq, Tweet.id == max_impact_sq.c.tweet_id)
+                .order_by(
+                    case((max_impact_sq.c.max_abs_impact.is_(None), 1), else_=0),
+                    max_impact_sq.c.max_abs_impact.desc().nullslast(),
+                    Tweet.created_at_twitter.desc(),
+                )
+                .limit(eff_limit)
+                .offset(offset)
+            )
         if base_filter is not None:
             stmt = stmt.where(base_filter)
         tweets = session.execute(stmt).scalars().all()

@@ -11,7 +11,7 @@ from db.connection import get_session_factory
 from jobs.outcomes import compute_for_unprocessed
 from jobs.recompute import recompute_all
 from scrapers.ingest import run as run_ingest
-from scrapers.twitterapiio import IngestQuery
+from scrapers.apify_twitter import IngestQuery
 
 
 def _ts() -> str:
@@ -39,6 +39,11 @@ def main(
             f"{result.features_upserted} features",
             flush=True,
         )
+        if getattr(result, "scrape_export_path", None):
+            print(
+                f"[{_ts()}] ingest: scrape manifest (text + posted_at) → {result.scrape_export_path}",
+                flush=True,
+            )
 
     Session = get_session_factory()
     with Session() as session:

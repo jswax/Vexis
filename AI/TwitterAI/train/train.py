@@ -130,7 +130,11 @@ def load_training_data(
         log("[train] Loading training data from DB...")
 
     outcomes = (
-        session.execute(select(TweetOutcome).order_by(TweetOutcome.created_at))
+        session.execute(
+            select(TweetOutcome)
+            .where(TweetOutcome.price_at_horizon.is_not(None))
+            .order_by(TweetOutcome.created_at)
+        )
         .scalars()
         .all()
     )

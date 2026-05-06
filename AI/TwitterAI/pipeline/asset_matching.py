@@ -78,7 +78,11 @@ def _load_db_seeds(session: Any) -> list[AliasSeed]:
         return []
 
 
-def extract_tickers(text: str, session: Any = None) -> list[TickerMatch]:
+def extract_tickers(
+    text: str,
+    session: Any = None,
+    db_seeds: list[Any] | None = None,
+) -> list[TickerMatch]:
     candidates: list[TickerMatch] = []
 
     # 1. Cashtags: $TSLA
@@ -106,9 +110,11 @@ def extract_tickers(text: str, session: Any = None) -> list[TickerMatch]:
             )
         )
 
-    # 3. Alias seeds (static + DB)
+    # 3. Alias seeds — use pre-loaded seeds if provided, else query DB once
     seeds = get_seeds()
-    if session is not None:
+    if db_seeds is not None:
+        seeds = seeds + db_seeds
+    elif session is not None:
         seeds = seeds + _load_db_seeds(session)
 
     cleaned = _clean_for_word_match(text)

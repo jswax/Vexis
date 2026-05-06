@@ -1,7 +1,2 @@
-node_modules
-dist
-.env
-.env.local
-.DS_Store
-prisma/dev.db
-
+# Per-scrape tweet manifests (may contain tweet text); keep out of git by default.
+exports/scrapes/
