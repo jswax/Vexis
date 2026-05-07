@@ -10,9 +10,9 @@ type User struct {
 	ID           uint           `gorm:"primaryKey"`
 	Email        string         `gorm:"uniqueIndex;not null"`
 	PasswordHash string         `gorm:"not null;column:password_hash"`
-	PhoneNumber  string         `gorm:"not null;column:phone_number"`
+	PhoneNumber  string         `gorm:"not null;default:'';column:phone_number"`
 
-	PhoneVerified bool `gorm:"not null;default:false;column:phone_verified"`
+	PhoneVerified bool `gorm:"not null;default:true;column:phone_verified"`
 	EmailVerified bool `gorm:"not null;default:false;column:email_verified"`
 
 	EmailVerifyToken *string    `gorm:"uniqueIndex;column:email_verify_token"`

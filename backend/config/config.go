@@ -138,10 +138,6 @@ func Load() (Config, error) {
 	if cfg.AppURL == "" {
 		return Config{}, errors.New("APP_URL is required")
 	}
-	if !cfg.SMSBypass &&
-		(cfg.TwilioAccountSID == "" || cfg.TwilioAuthToken == "" || cfg.TwilioPhoneNumber == "") {
-		return Config{}, errors.New("TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER are required (or set SMS_BYPASS=true for local dev)")
-	}
 	if !cfg.EmailBypass {
 		hasSendgrid := cfg.SendgridAPIKey != ""
 		hasSMTP := cfg.SMTPHost != "" && cfg.SMTPPort != "" && cfg.SMTPUser != "" && cfg.SMTPPassword != ""
