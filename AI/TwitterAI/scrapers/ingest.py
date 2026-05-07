@@ -33,7 +33,7 @@ from pipeline.match_filter import filter_matches_for_ingest
 from pipeline.deduper import exact_text_hash, near_dup_hash
 from pipeline.feature_scoring import compute_feature_scores
 from config import get_settings
-from pipeline.qqq_signal import QQQ_CORE_TICKERS
+from pipeline.qqq_signal import QQQ_CORE_TICKERS, QQQ_TRAINING_MATCH_TICKERS
 from log_buffer import log, ts
 from scrapers import apify_twitter as twapi
 from scrapers.normalizer import NormalizedAuthor, NormalizedBundle, normalize
@@ -157,17 +157,28 @@ def _write_scrape_tweet_export(job_id: str, bundles: list[NormalizedBundle]) -> 
     return str(path.resolve())
 
 
+def _tweet_lang_primary_is_en(lang: str | None) -> bool:
+    if not lang or not str(lang).strip():
+        return False
+    primary = str(lang).strip().lower().split("-", 1)[0]
+    return primary == "en"
+
+
 def _gather_bundles(
     raw_items: list[dict[str, Any]],
     *,
     scraped_at: datetime,
     source_label: str | None,
     source_query_type: str | None,
+    english_only: bool | None = None,
 ) -> list[NormalizedBundle]:
     """Normalize Apify items with the same dedupe rules as before (dedupe is CPU-only)."""
+    if english_only is None:
+        english_only = bool(get_settings().ingest_english_only)
     seen_external_ids: set[str] = set()
     seen_text_hashes: set[str] = set()
     out: list[NormalizedBundle] = []
+    skipped_non_en = 0
     for raw in raw_items:
         bundle = normalize(
             raw,
@@ -177,6 +188,9 @@ def _gather_bundles(
         )
         if bundle is None:
             continue
+        if english_only and not _tweet_lang_primary_is_en(bundle.tweet.language):
+            skipped_non_en += 1
+            continue
         if bundle.tweet.external_id in seen_external_ids:
             continue
         seen_external_ids.add(bundle.tweet.external_id)
@@ -185,6 +199,8 @@ def _gather_bundles(
             continue
         seen_text_hashes.add(text_hash)
         out.append(bundle)
+    if skipped_non_en:
+        log(f"[{ts()}] ingest: skipped {skipped_non_en} tweet(s) (non-English or missing lang tag)")
     return out
 
 
@@ -327,6 +343,12 @@ def _bulk_upsert_features(session: Session, feat_values: list[dict[str, Any]]) -
 def flush_prediction_rows_batch(session: Session, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
+    # Deduplicate by constraint key so ON CONFLICT DO UPDATE doesn't see the same key twice
+    deduped: dict[tuple, dict] = {}
+    for row in rows:
+        key = (row["tweet_id"], row["ticker"], row["horizon"], row["model_version"])
+        deduped[key] = row
+    rows = list(deduped.values())
     n = 0
     for i in range(0, len(rows), PREDICTION_UPSERT_CHUNK):
         chunk = rows[i : i + PREDICTION_UPSERT_CHUNK]
@@ -521,35 +543,42 @@ def _execute_ingest_core(
                     }
                 )
 
-            if ingest_preds and matches:
-                for m in matches:
-                    pred_targets.append(
-                        _PredTarget(
-                            tweet_id=tweet_id,
-                            text=b.tweet.text,
-                            ticker=m["ticker"],
-                            asset_type=m["asset_type"],
-                            match_method=m["match_method"],
-                            match_confidence=m["confidence"],
-                            username=b.author.username,
-                            author_verified=b.author.verified,
-                            followers_count=b.author.followers_count,
-                            following_count=b.author.following_count,
-                            statuses_count=b.author.statuses_count,
-                            spam_score=scores["spam_score"],
-                            credibility_score=scores["credibility_score"],
-                            is_retweet=b.tweet.is_retweet,
-                            is_reply=b.tweet.is_reply,
-                            is_quote=b.tweet.is_quote,
-                            has_images=b.tweet.has_images,
-                            has_video=b.tweet.has_video,
-                            like_count=b.tweet.like_count,
-                            retweet_count=b.tweet.retweet_count,
-                            reply_count=b.tweet.reply_count,
-                            view_count=b.tweet.view_count,
-                            created_at=b.tweet.created_at_twitter,
-                        )
+            train_matches = [
+                m
+                for m in matches
+                if (m.get("ticker") or "").upper() in QQQ_TRAINING_MATCH_TICKERS
+            ]
+            if ingest_preds and train_matches:
+                # One QQQ-labelled prediction per tweet; feature vector uses best
+                # top-holding / QQQ ETF match; rows are stored with ticker QQQ.
+                best = max(train_matches, key=lambda x: float(x["confidence"]))
+                pred_targets.append(
+                    _PredTarget(
+                        tweet_id=tweet_id,
+                        text=b.tweet.text,
+                        ticker=best["ticker"],
+                        asset_type=best["asset_type"],
+                        match_method=best["match_method"],
+                        match_confidence=best["confidence"],
+                        username=b.author.username,
+                        author_verified=b.author.verified,
+                        followers_count=b.author.followers_count,
+                        following_count=b.author.following_count,
+                        statuses_count=b.author.statuses_count,
+                        spam_score=scores["spam_score"],
+                        credibility_score=scores["credibility_score"],
+                        is_retweet=b.tweet.is_retweet,
+                        is_reply=b.tweet.is_reply,
+                        is_quote=b.tweet.is_quote,
+                        has_images=b.tweet.has_images,
+                        has_video=b.tweet.has_video,
+                        like_count=b.tweet.like_count,
+                        retweet_count=b.tweet.retweet_count,
+                        reply_count=b.tweet.reply_count,
+                        view_count=b.tweet.view_count,
+                        created_at=b.tweet.created_at_twitter,
                     )
+                )
 
         asset_matches_created += _bulk_insert_matches(session, match_rows)
         _bulk_upsert_features(session, feat_rows)
@@ -645,7 +674,7 @@ def _run_predictions(targets: list[_PredTarget]) -> int:
                         {
                             "id": _new_id(),
                             "tweet_id": t.tweet_id,
-                            "ticker": t.ticker,
+                            "ticker": "QQQ",
                             "horizon": hp.horizon,
                             "model_version": hp.model_version,
                             "direction_pred": hp.direction,

@@ -4,9 +4,13 @@ TwitterAI direction prediction model — training pipeline.
 Architecture
 ────────────
 One LightGBM classifier per horizon (M5 … D1). Each model sees:
-  • Tabular features  — author stats, ticker identity, QQQ channel scores,
-                        sentiment scores, time signals, tweet metadata, engagement
+  • Tabular features  — author stats, ticker identity (top QQQ holdings + QQQ/QQQM),
+                        QQQ channel scores, sentiment, time signals, metadata, engagement
   • Text features     — TF-IDF (unigrams + bigrams) → TruncatedSVD (64 dims)
+
+Training rows use TweetOutcome ticker QQQ (including rows whose price path came from
+a top holding), but ticker one-hots / match features come from the best holding or
+ETF match on that tweet (see QQQ_TRAINING_MATCH_TICKERS).
 
 Horizon is NOT a feature. Training one model per horizon prevents horizon_idx
 from dominating the global model and forces each classifier to learn actual
@@ -72,6 +76,7 @@ from db.models import (
     TwitterAuthor,
 )
 from log_buffer import log
+from pipeline.qqq_signal import QQQ_TRAINING_MATCH_TICKERS
 from train.features import (
     DIRECTION_LABELS,
     HORIZONS_ORDERED,
@@ -117,6 +122,10 @@ SVD_N_COMPONENTS = 64
 MIN_HORIZON_ROWS = 30   # minimum samples to train a horizon model
 MIN_TOTAL_ROWS = 50
 
+# All class indices for sklearn metrics — required when a horizon slice omits a label
+# so target_names (3 names) still aligns with classification_report / confusion_matrix.
+_DIRECTION_LABEL_INDICES: list[int] = list(range(len(DIRECTION_LABELS)))
+
 
 # ── Data loading ───────────────────────────────────────────────────────────────
 
@@ -132,6 +141,7 @@ def load_training_data(
     outcomes = (
         session.execute(
             select(TweetOutcome)
+            .where(TweetOutcome.ticker == "QQQ")
             .where(TweetOutcome.price_at_horizon.is_not(None))
             .order_by(TweetOutcome.created_at)
         )
@@ -166,11 +176,16 @@ def load_training_data(
         .scalars()
         .all()
     )
-    best_match: dict[tuple[str, str], TweetAssetMatch] = {}
+    # QQQ outcomes share one label ticker; features use the best *holding or QQQ ETF* match.
+    best_train_match_by_tweet: dict[str, TweetAssetMatch] = {}
     for m in match_rows:
-        key = (m.tweet_id, m.ticker.upper())
-        if key not in best_match or m.confidence > best_match[key].confidence:
-            best_match[key] = m
+        tkr = (m.ticker or "").upper()
+        if tkr not in QQQ_TRAINING_MATCH_TICKERS:
+            continue
+        tid = m.tweet_id
+        prev = best_train_match_by_tweet.get(tid)
+        if prev is None or float(m.confidence) > float(prev.confidence):
+            best_train_match_by_tweet[tid] = m
 
     features_rows = {
         f.tweet_id: f
@@ -187,7 +202,7 @@ def load_training_data(
         if tweet is None:
             continue
         author = authors.get(tweet.author_id)
-        match = best_match.get((o.tweet_id, (o.ticker or "").upper()))
+        match = best_train_match_by_tweet.get(o.tweet_id)
         feat_row = features_rows.get(o.tweet_id)
 
         rows.append(
@@ -210,8 +225,8 @@ def load_training_data(
                 "followers_count": author.followers_count if author else None,
                 "following_count": author.following_count if author else None,
                 "statuses_count": author.statuses_count if author else None,
-                "ticker": o.ticker or "",
-                "asset_type": match.asset_type if match else "STOCK",
+                "ticker": (match.ticker or "QQQ") if match else "QQQ",
+                "asset_type": match.asset_type if match else "ETF",
                 "match_method": match.match_method if match else "",
                 "match_confidence": float(match.confidence) if match else 0.7,
                 "spam_score": feat_row.spam_score if feat_row else None,
@@ -356,17 +371,26 @@ def train_one_horizon(
     cv_weighted_f1 = f1_score(y, cv_preds, average="weighted", zero_division=0)
     cv_report = classification_report(
         y, cv_preds,
+        labels=_DIRECTION_LABEL_INDICES,
         target_names=DIRECTION_LABELS,
         zero_division=0,
         output_dict=True,
     )
-    cv_conf = confusion_matrix(y, cv_preds).tolist()
+    cv_conf = confusion_matrix(
+        y, cv_preds, labels=_DIRECTION_LABEL_INDICES
+    ).tolist()
 
     if verbose:
         log(f"[train] [{horizon}] macro-F1: {cv_macro_f1:.4f}  weighted-F1: {cv_weighted_f1:.4f}")
         log(
             f"[train] [{horizon}] Report:\n"
-            + classification_report(y, cv_preds, target_names=DIRECTION_LABELS, zero_division=0)
+            + classification_report(
+                y,
+                cv_preds,
+                labels=_DIRECTION_LABEL_INDICES,
+                target_names=DIRECTION_LABELS,
+                zero_division=0,
+            )
         )
 
     if verbose:
@@ -540,7 +564,9 @@ def run_training(
             )
             test_macro_f1 = f1_score(y_htest, test_preds, average="macro", zero_division=0)
             test_report = classification_report(
-                y_htest, test_preds,
+                y_htest,
+                test_preds,
+                labels=_DIRECTION_LABEL_INDICES,
                 target_names=DIRECTION_LABELS,
                 zero_division=0,
                 output_dict=True,

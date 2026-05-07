@@ -186,7 +186,12 @@ def ingest(req: IngestRequest, _: None = Depends(_require_token)):
 
     # Default start to 30 days ago so ingest always has a meaningful window.
     from datetime import timedelta
+
     effective_start = req.start or (datetime.now(tz=timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+
+    eff_tweet_language = req.tweet_language
+    if eff_tweet_language is None:
+        eff_tweet_language = (get_settings().ingest_tweet_language or "").strip() or None
 
     q = IngestQuery(
         search_terms=search_terms,
@@ -194,7 +199,7 @@ def ingest(req: IngestRequest, _: None = Depends(_require_token)):
         conversation_ids=req.conversation_ids,
         max_items=req.max_items,
         sort=req.sort,
-        tweet_language=req.tweet_language,
+        tweet_language=eff_tweet_language,
         minimum_retweets=req.minimum_retweets,
         minimum_favorites=req.minimum_favorites,
         only_verified_users=req.only_verified_users,
@@ -252,9 +257,64 @@ def ingest(req: IngestRequest, _: None = Depends(_require_token)):
 
 # ── Outcome computation ───────────────────────────────────────────────────────
 
+class PurgeRequest(BaseModel):
+    confirm: bool = Field(
+        default=False,
+        description="Must be true to execute the purge.",
+    )
+    qqq_only: bool = Field(
+        default=True,
+        description="When true, delete rows where ticker != 'QQQ'. When false, delete ALL rows.",
+    )
+
+
+@app.post("/api/twitter/purge-non-qqq")
+def purge_non_qqq(_: None = Depends(_require_token), req: PurgeRequest = PurgeRequest()) -> dict:
+    """Delete outcome/prediction/snapshot rows that are not ticker='QQQ' (or all rows when qqq_only=False)."""
+    if not req.confirm:
+        return {"ok": False, "error": "Set confirm=true to execute purge."}
+
+    from sqlalchemy import delete
+    from db.models import MarketSnapshot, TweetOutcome, TweetPrediction
+
+    with Session() as session:
+        if req.qqq_only:
+            del_outcomes = session.execute(
+                delete(TweetOutcome).where(TweetOutcome.ticker != "QQQ")
+            ).rowcount
+            del_preds = session.execute(
+                delete(TweetPrediction).where(TweetPrediction.ticker != "QQQ")
+            ).rowcount
+            del_snaps = session.execute(
+                delete(MarketSnapshot).where(MarketSnapshot.ticker != "QQQ")
+            ).rowcount
+            label = "non-QQQ"
+        else:
+            del_outcomes = session.execute(delete(TweetOutcome)).rowcount
+            del_preds = session.execute(delete(TweetPrediction)).rowcount
+            del_snaps = session.execute(delete(MarketSnapshot)).rowcount
+            label = "all"
+        session.commit()
+
+    log(
+        f"[{__name__}] purge-non-qqq: deleted {label} rows — "
+        f"outcomes={del_outcomes} predictions={del_preds} snapshots={del_snaps}"
+    )
+    return {
+        "ok": True,
+        "deleted_outcomes": del_outcomes,
+        "deleted_predictions": del_preds,
+        "deleted_snapshots": del_snaps,
+    }
+
+
 class OutcomeRequest(BaseModel):
     limit: int = Field(default=50, ge=1, le=500)
     qqq_only: bool = True
+    force: bool = Field(
+        default=False,
+        description="Recompute outcomes for all tweets, even those that already have rows.",
+    )
     all_tweets: bool = Field(
         default=False,
         description="Process every tweet that still needs outcomes, in internal batches (ignores limit).",
@@ -266,14 +326,14 @@ class OutcomeRequest(BaseModel):
 def compute_outcomes(req: OutcomeRequest, _: None = Depends(_require_token)) -> dict:
     log(
         f"[{__name__}] compute-outcomes start "
-        f"(all_tweets={req.all_tweets}, limit={req.limit}, chunk_size={req.chunk_size}, qqq_only={req.qqq_only})"
+        f"(all_tweets={req.all_tweets}, force={req.force}, limit={req.limit}, chunk_size={req.chunk_size}, qqq_only={req.qqq_only})"
     )
     with Session() as session:
         result = compute_for_unprocessed(
             session,
             limit=req.limit,
             qqq_only=req.qqq_only,
-            force=False,
+            force=req.force,
             run_all=req.all_tweets,
             chunk_size=req.chunk_size,
         )
@@ -287,6 +347,7 @@ def compute_outcomes(req: OutcomeRequest, _: None = Depends(_require_token)) -> 
         "skipped_no_asset": result.skipped_no_asset,
         "errors": result.errors,
         "qqq_only": req.qqq_only,
+        "force": req.force,
         "all_tweets": req.all_tweets,
         "chunks_completed": result.chunks_completed,
     }
@@ -487,6 +548,7 @@ def backfill_predictions(req: BackfillRequest, _: None = Depends(_require_token)
     from sqlalchemy import select
     from db.models import TweetAssetMatch, TweetFeatures, TweetPrediction, TwitterAuthor
     from inference.model import get_predictor
+    from pipeline.qqq_signal import QQQ_TRAINING_MATCH_TICKERS
     from scrapers.ingest import PREDICTION_UPSERT_CHUNK, flush_prediction_rows_batch
 
     predictor = get_predictor()
@@ -552,58 +614,64 @@ def backfill_predictions(req: BackfillRequest, _: None = Depends(_require_token)
 
         for tweet in tweets:
             author = author_map.get(tweet.author_id)
-            matches = match_map.get(tweet.id, [])
+            raw_matches = match_map.get(tweet.id, [])
             feats = feat_map.get(tweet.id)
 
+            matches = [
+                m
+                for m in raw_matches
+                if (m.ticker or "").upper() in QQQ_TRAINING_MATCH_TICKERS
+            ]
             if not matches:
                 continue
 
-            for m in matches:
-                try:
-                    horizon_preds = predictor.predict_all_horizons(
-                        text=tweet.text or "",
-                        ticker=m.ticker,
-                        asset_type=m.asset_type,
-                        match_method=m.match_method,
-                        match_confidence=float(m.confidence),
-                        username=author.username if author else None,
-                        author_verified=bool(author.verified) if author else False,
-                        followers_count=author.followers_count if author else None,
-                        following_count=author.following_count if author else None,
-                        statuses_count=author.statuses_count if author else None,
-                        spam_score=feats.spam_score if feats else None,
-                        credibility_score=feats.credibility_score if feats else None,
-                        is_retweet=bool(tweet.is_retweet),
-                        is_reply=bool(tweet.is_reply),
-                        is_quote=bool(tweet.is_quote),
-                        has_images=bool(tweet.has_images),
-                        has_video=bool(tweet.has_video),
-                        like_count=tweet.like_count,
-                        retweet_count=tweet.retweet_count,
-                        reply_count=tweet.reply_count,
-                        view_count=tweet.view_count,
-                        created_at=tweet.created_at_twitter,
+            # One QQQ-labelled row per tweet; features from best holding / QQQ ETF match.
+            best = max(matches, key=lambda m: float(m.confidence))
+            try:
+                horizon_preds = predictor.predict_all_horizons(
+                    text=tweet.text or "",
+                    ticker=best.ticker,
+                    asset_type=best.asset_type,
+                    match_method=best.match_method,
+                    match_confidence=float(best.confidence),
+                    username=author.username if author else None,
+                    author_verified=bool(author.verified) if author else False,
+                    followers_count=author.followers_count if author else None,
+                    following_count=author.following_count if author else None,
+                    statuses_count=author.statuses_count if author else None,
+                    spam_score=feats.spam_score if feats else None,
+                    credibility_score=feats.credibility_score if feats else None,
+                    is_retweet=bool(tweet.is_retweet),
+                    is_reply=bool(tweet.is_reply),
+                    is_quote=bool(tweet.is_quote),
+                    has_images=bool(tweet.has_images),
+                    has_video=bool(tweet.has_video),
+                    like_count=tweet.like_count,
+                    retweet_count=tweet.retweet_count,
+                    reply_count=tweet.reply_count,
+                    view_count=tweet.view_count,
+                    created_at=tweet.created_at_twitter,
+                )
+                for hp in horizon_preds:
+                    pred_buf.append(
+                        {
+                            "id": str(uuid.uuid4()),
+                            "tweet_id": tweet.id,
+                            "ticker": "QQQ",
+                            "horizon": hp.horizon,
+                            "model_version": hp.model_version,
+                            "direction_pred": hp.direction,
+                            "bullish_prob": hp.bullish_prob,
+                            "bearish_prob": hp.bearish_prob,
+                            "neutral_prob": hp.neutral_prob,
+                            "confidence": hp.confidence,
+                        }
                     )
-                    for hp in horizon_preds:
-                        pred_buf.append(
-                            {
-                                "id": str(uuid.uuid4()),
-                                "tweet_id": tweet.id,
-                                "ticker": m.ticker,
-                                "horizon": hp.horizon,
-                                "model_version": hp.model_version,
-                                "direction_pred": hp.direction,
-                                "bullish_prob": hp.bullish_prob,
-                                "bearish_prob": hp.bearish_prob,
-                                "neutral_prob": hp.neutral_prob,
-                                "confidence": hp.confidence,
-                            }
-                        )
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
-                if len(pred_buf) >= PREDICTION_UPSERT_CHUNK:
-                    _flush_preds()
+            if len(pred_buf) >= PREDICTION_UPSERT_CHUNK:
+                _flush_preds()
 
             processed += 1
             if processed % 50 == 0:
@@ -637,6 +705,7 @@ def predict_tweet(req: PredictRequest, _: None = Depends(_require_token)) -> dic
     from db.models import TweetAssetMatch, TweetFeatures, TwitterAuthor
     from inference.model import get_predictor
     from scrapers.ingest import flush_prediction_rows_batch
+    from pipeline.qqq_signal import QQQ_TRAINING_MATCH_TICKERS
 
     predictor = get_predictor()
     if not predictor.is_ready:
@@ -651,6 +720,7 @@ def predict_tweet(req: PredictRequest, _: None = Depends(_require_token)) -> dic
             raise HTTPException(status_code=404, detail="Tweet not found")
 
         author = session.get(__import__("db.models", fromlist=["TwitterAuthor"]).TwitterAuthor, tweet.author_id)
+
         matches = (
             session.execute(
                 select(TweetAssetMatch)
@@ -660,6 +730,11 @@ def predict_tweet(req: PredictRequest, _: None = Depends(_require_token)) -> dic
             .scalars()
             .all()
         )
+        train_matches = [
+            m
+            for m in matches
+            if (m.ticker or "").upper() in QQQ_TRAINING_MATCH_TICKERS
+        ]
         feat_row = (
             session.execute(
                 select(TweetFeatures).where(TweetFeatures.tweet_id == req.tweet_id)
@@ -669,13 +744,14 @@ def predict_tweet(req: PredictRequest, _: None = Depends(_require_token)) -> dic
 
         all_preds: list[dict] = []
         rows: list[dict] = []
-        for m in matches:
+        if train_matches:
+            best = max(train_matches, key=lambda m: float(m.confidence))
             horizon_preds = predictor.predict_all_horizons(
                 text=tweet.text or "",
-                ticker=m.ticker,
-                asset_type=m.asset_type,
-                match_method=m.match_method,
-                match_confidence=float(m.confidence),
+                ticker=best.ticker,
+                asset_type=best.asset_type,
+                match_method=best.match_method,
+                match_confidence=float(best.confidence),
                 username=author.username if author else None,
                 author_verified=bool(author.verified) if author else False,
                 followers_count=author.followers_count if author else None,
@@ -699,7 +775,7 @@ def predict_tweet(req: PredictRequest, _: None = Depends(_require_token)) -> dic
                     {
                         "id": str(uuid.uuid4()),
                         "tweet_id": tweet.id,
-                        "ticker": m.ticker,
+                        "ticker": "QQQ",
                         "horizon": hp.horizon,
                         "model_version": hp.model_version,
                         "direction_pred": hp.direction,
@@ -709,7 +785,7 @@ def predict_tweet(req: PredictRequest, _: None = Depends(_require_token)) -> dic
                         "confidence": hp.confidence,
                     }
                 )
-                all_preds.append({"ticker": m.ticker, **hp.to_dict()})
+                all_preds.append({"ticker": "QQQ", **hp.to_dict()})
 
         if rows:
             flush_prediction_rows_batch(session, rows)
@@ -771,16 +847,35 @@ def list_tweets(
             cutoff_filter = Tweet.created_at_twitter >= train_cutoff_dt
             base_filter = cutoff_filter if base_filter is None else (base_filter & cutoff_filter)
 
+        # Subquery: tweets that have at least one asset match
+        has_match_sq = (
+            select(TweetAssetMatch.tweet_id)
+            .distinct()
+            .subquery()
+        )
+
         # Global section totals (ignores limit/offset)
+        # "uncomputed" = has an asset match but no outcome rows yet (actionable)
+        # "no_match"   = no asset match at all (can never be computed)
         totals_stmt = (
             select(
                 func.count(Tweet.id).label("total"),
                 func.sum(
                     case(
-                        (max_impact_sq.c.max_abs_impact.is_(None), 1),
+                        (
+                            max_impact_sq.c.max_abs_impact.is_(None)
+                            & has_match_sq.c.tweet_id.isnot(None),
+                            1,
+                        ),
                         else_=0,
                     )
                 ).label("uncomputed"),
+                func.sum(
+                    case(
+                        (has_match_sq.c.tweet_id.is_(None), 1),
+                        else_=0,
+                    )
+                ).label("no_match"),
                 func.sum(
                     case(
                         (
@@ -814,6 +909,7 @@ def list_tweets(
             )
             .select_from(Tweet)
             .outerjoin(max_impact_sq, Tweet.id == max_impact_sq.c.tweet_id)
+            .outerjoin(has_match_sq, Tweet.id == has_match_sq.c.tweet_id)
         )
         if base_filter is not None:
             totals_stmt = totals_stmt.where(base_filter)
@@ -821,10 +917,90 @@ def list_tweets(
         total = int(totals_row.total or 0)
         section_totals = {
             "uncomputed": int(totals_row.uncomputed or 0),
+            "no_match": int(totals_row.no_match or 0),
             "impact_1_5": int(totals_row.impact_1_5 or 0),
             "impact_5_8": int(totals_row.impact_5_8 or 0),
             "impact_8_10": int(totals_row.impact_8_10 or 0),
         }
+
+        pred_id_sq = select(TweetPrediction.tweet_id).distinct().subquery()
+        predicted_stmt = (
+            select(func.count())
+            .select_from(Tweet)
+            .where(Tweet.id.in_(select(pred_id_sq.c.tweet_id)))
+        )
+        if base_filter is not None:
+            predicted_stmt = predicted_stmt.where(base_filter)
+        section_totals["predicted"] = int(session.execute(predicted_stmt).scalar_one() or 0)
+
+        if train_cutoff_dt is not None:
+            in_sample_cond = Tweet.created_at_twitter < train_cutoff_dt
+            in_sample_q = select(func.count()).select_from(Tweet).where(
+                (base_filter & in_sample_cond) if base_filter is not None else in_sample_cond
+            )
+            section_totals["in_sample"] = int(session.execute(in_sample_q).scalar_one() or 0)
+        else:
+            section_totals["in_sample"] = 0
+
+        # Full test-set accuracy (all tweets matching test_only), not just this page
+        test_eval_by_horizon: dict[str, dict[str, int]] | None = None
+        if test_only and train_cutoff_dt is not None:
+            from train.features import HORIZONS_ORDERED
+
+            id_stmt = select(Tweet.id)
+            if base_filter is not None:
+                id_stmt = id_stmt.where(base_filter)
+            test_tweet_ids = [r[0] for r in session.execute(id_stmt).all()]
+            if not test_tweet_ids:
+                test_eval_by_horizon = {
+                    h: {"correct": 0, "total": 0} for h in HORIZONS_ORDERED
+                }
+            else:
+                outcomes_all = (
+                    session.execute(
+                        select(TweetOutcome).where(
+                            TweetOutcome.tweet_id.in_(test_tweet_ids),
+                            TweetOutcome.ticker == "QQQ",
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                preds_all = (
+                    session.execute(
+                        select(TweetPrediction)
+                        .where(
+                            TweetPrediction.tweet_id.in_(test_tweet_ids),
+                            TweetPrediction.ticker == "QQQ",
+                        )
+                        .order_by(TweetPrediction.created_at.desc())
+                    )
+                    .scalars()
+                    .all()
+                )
+                outcome_map: dict[tuple[str, str], str] = {}
+                for o in outcomes_all:
+                    hz = o.horizon.value if hasattr(o.horizon, "value") else str(o.horizon)
+                    dl = o.direction_label
+                    outcome_map[(o.tweet_id, hz)] = (
+                        dl.value if hasattr(dl, "value") else str(dl)
+                    )
+                pred_map: dict[tuple[str, str], str] = {}
+                for p in preds_all:
+                    key = (p.tweet_id, p.horizon)
+                    if key not in pred_map:
+                        pred_map[key] = p.direction_pred
+                test_eval_by_horizon = {
+                    h: {"correct": 0, "total": 0} for h in HORIZONS_ORDERED
+                }
+                for h in HORIZONS_ORDERED:
+                    for tid in test_tweet_ids:
+                        pred = pred_map.get((tid, h))
+                        actual = outcome_map.get((tid, h))
+                        if pred and actual:
+                            test_eval_by_horizon[h]["total"] += 1
+                            if pred == actual:
+                                test_eval_by_horizon[h]["correct"] += 1
 
         eff_limit = min(limit, 500 if test_only else 100)
         if sort == "recent":
@@ -904,13 +1080,9 @@ def list_tweets(
                     tweet.text, list(matches_by_tweet.get(tweet.id, []))
                 )
                 allowed = {(m.ticker or "").upper() for m in matches}
-                outcomes = list(outcomes_by_tweet.get(tweet.id, []))
-                if allowed:
-                    outcomes = [o for o in outcomes if (o.ticker or "").upper() in allowed]
+                outcomes = [o for o in outcomes_by_tweet.get(tweet.id, []) if (o.ticker or "").upper() == "QQQ"]
                 features = features_by_tweet.get(tweet.id)
-                predictions = list(preds_by_tweet.get(tweet.id, []))
-                if allowed:
-                    predictions = [p for p in predictions if (p.ticker or "").upper() in allowed]
+                predictions = [p for p in preds_by_tweet.get(tweet.id, []) if (p.ticker or "").upper() == "QQQ"]
 
                 matched_tickers = [m.ticker for m in matches]
                 impacts = [int(o.impact_score) for o in outcomes if o.impact_score is not None]
@@ -994,7 +1166,7 @@ def list_tweets(
 
     if qqq:
         rows.sort(key=lambda r: (r.get("qqq") or {}).get("score", 0.0), reverse=True)
-    return {
+    out: dict[str, Any] = {
         "tweets": rows,
         "count": len(rows),
         "total": int(total or 0),
@@ -1002,6 +1174,9 @@ def list_tweets(
         "offset": offset,
         "qqq_mode": qqq,
     }
+    if test_only:
+        out["test_eval_by_horizon"] = test_eval_by_horizon
+    return out
 
 
 # ── Tweet lookup ─────────────────────────────────────────────────────────────

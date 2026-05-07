@@ -37,6 +37,10 @@ class Settings(BaseSettings):
         le=60,
         validation_alias="TWITTERAI_INGEST_DATE_SHARD_DAYS",
     )
+    # Apify tweetLanguage when the API request omits tweet_language (BCP47, e.g. en). Empty = do not send.
+    ingest_tweet_language: str = Field(default="en", validation_alias="TWITTERAI_INGEST_TWEET_LANGUAGE")
+    # After normalize, drop tweets whose lang is missing or not en* (belt-and-suspenders vs Apify).
+    ingest_english_only: bool = Field(default=True, validation_alias="TWITTERAI_INGEST_ENGLISH_ONLY")
 
     # Alpaca
     market_data_provider: str = Field(default="none", validation_alias="MARKET_DATA_PROVIDER")

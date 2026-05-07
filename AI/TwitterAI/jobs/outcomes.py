@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -34,9 +34,15 @@ from pipeline.labeling import (
 from pipeline.qqq_signal import QQQ_CORE_TICKERS
 from prices.alpaca_bars import PricePoint, get_bars_batch, map_tweet_to_pricepoints
 
+# Tickers whose tweets we will process. Top-10 holdings are included so we get
+# more QQQ-labelled training rows — their outcomes are stored as ticker="QQQ".
 _QQQ_ALLOWED: frozenset[str] = frozenset(QQQ_CORE_TICKERS) | frozenset({
     "QQQ", "QQQM", "SPY",
 })
+
+# Top-10 holdings: outcomes for these are mapped to QQQ price movement, not
+# the stock's own price movement, so every training row predicts QQQ direction.
+_TOP10_HOLDINGS: frozenset[str] = frozenset(QQQ_CORE_TICKERS)
 
 BENCH_TICKER = "SPY"
 
@@ -102,13 +108,20 @@ def _ordered_tweet_ids_for_compute(
 
     match_cond = TweetAssetMatch.ticker.in_(list(_QQQ_ALLOWED)) if qqq_only else True
 
+    # Top-10 holdings are stored as outcome_ticker="QQQ", so map them before
+    # checking completion — otherwise AAPL/NVDA/etc. never match their QQQ rows.
+    outcome_ticker_expr = case(
+        (TweetAssetMatch.ticker.in_(list(_TOP10_HOLDINGS)), "QQQ"),
+        else_=TweetAssetMatch.ticker,
+    )
+
     # tweet_ids where at least one ticker is missing outcome rows
     incomplete_sq = (
         select(TweetAssetMatch.tweet_id.label("tweet_id"))
         .outerjoin(
             outcome_count_sq,
             (TweetAssetMatch.tweet_id == outcome_count_sq.c.tweet_id)
-            & (TweetAssetMatch.ticker == outcome_count_sq.c.ticker),
+            & (outcome_ticker_expr == outcome_count_sq.c.ticker),
         )
         .where(match_cond)
         .where(
@@ -162,7 +175,8 @@ def _compute_outcomes_one_chunk(
 
     # ── Step 1: collect all matches and tickers upfront ───────────────────────
     tweet_matches: dict[str, list[TweetAssetMatch]] = {}  # tweet.id -> [TweetAssetMatch]
-    all_tickers: set[str] = {BENCH_TICKER}
+    # Always fetch QQQ bars — top-10 holding tweets use QQQ prices as their outcome.
+    all_tickers: set[str] = {BENCH_TICKER, "QQQ"}
     tweet_times: list[datetime] = []
 
     tweet_ids = [t.id for t in tweets]
@@ -321,20 +335,24 @@ def _compute_outcomes_one_chunk(
         for match in matches:
             ticker = match.ticker.upper()
             asset_type = match.asset_type
-            ticker_bars = bars_map.get(ticker, [])
+            # Top-10 holdings: use QQQ price bars and label as "QQQ" so every
+            # training row predicts QQQ direction, not the individual stock's move.
+            outcome_ticker = "QQQ" if ticker in _TOP10_HOLDINGS else ticker
+            outcome_asset_type = "ETF" if outcome_ticker == "QQQ" else asset_type
+            ticker_bars = bars_map.get(outcome_ticker, [])
 
             snap, horizon_pps = map_tweet_to_pricepoints(
-                ticker_bars, t0, horizon_times, symbol=ticker
+                ticker_bars, t0, horizon_times, symbol=outcome_ticker
             )
 
             if snap is None:
-                # No base price — write sentinels for all horizons so this
-                # (tweet, ticker) pair is permanently marked complete.
+                # No base price — write sentinels so this (tweet, outcome_ticker)
+                # pair is permanently marked complete and won't loop forever.
                 for h in HORIZONS:
                     outcome_rows.append({
                         "id": _new_id(),
                         "tweet_id": tweet.id,
-                        "ticker": ticker,
+                        "ticker": outcome_ticker,
                         "horizon": h["horizon"],
                         "price_at_tweet": None,
                         "price_at_horizon": None,
@@ -353,8 +371,8 @@ def _compute_outcomes_one_chunk(
                 {
                     "id": _new_id(),
                     "tweet_id": tweet.id,
-                    "ticker": ticker,
-                    "asset_type": asset_type,
+                    "ticker": outcome_ticker,
+                    "asset_type": outcome_asset_type,
                     "timestamp": snap.timestamp,
                     "price": snap.price,
                     "volume": snap.volume,
@@ -385,7 +403,7 @@ def _compute_outcomes_one_chunk(
                     outcome_rows.append({
                         "id": _new_id(),
                         "tweet_id": tweet.id,
-                        "ticker": ticker,
+                        "ticker": outcome_ticker,
                         "horizon": horizon,
                         "price_at_tweet": snap.price,
                         "price_at_horizon": None,
@@ -428,7 +446,7 @@ def _compute_outcomes_one_chunk(
                     {
                         "id": _new_id(),
                         "tweet_id": tweet.id,
-                        "ticker": ticker,
+                        "ticker": outcome_ticker,
                         "horizon": horizon,
                         "price_at_tweet": snap.price,
                         "price_at_horizon": price_at_horizon.price,

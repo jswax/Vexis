@@ -108,12 +108,12 @@ def compute_impact_score(
 
 def compute_direction_label(
     excess_return: float | None,
-    raw_return: float,
+    raw_return: float | None,
     horizon: str | None = None,
 ) -> Literal["BULLISH", "BEARISH", "NEUTRAL"]:
     threshold = HORIZON_THRESHOLDS.get(horizon, DIRECTION_THRESHOLD) if horizon else DIRECTION_THRESHOLD
     r = excess_return if excess_return is not None else raw_return
-    if not math.isfinite(r):
+    if r is None or not math.isfinite(r):
         return "NEUTRAL"
     if r >= threshold:
         return "BULLISH"

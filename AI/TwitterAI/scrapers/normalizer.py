@@ -94,6 +94,12 @@ def _rec(v: Any) -> dict[str, Any]:
     return v if isinstance(v, dict) else {}
 
 
+def parse_apify_item_created_at(item: Any) -> datetime | None:
+    """Tweet created time from a raw Apify timeline item (same keys as normalize())."""
+    t = _rec(item)
+    return _date(t.get("createdAt") or t.get("created_at") or t.get("twitterCreatedAt"))
+
+
 def normalize(
     raw: Any,
     *,
@@ -111,9 +117,7 @@ def normalize(
     if not text:
         return None
 
-    created_at_twitter = _date(
-        t.get("createdAt") or t.get("created_at") or t.get("twitterCreatedAt")
-    )
+    created_at_twitter = parse_apify_item_created_at(t)
     if not created_at_twitter:
         return None
 

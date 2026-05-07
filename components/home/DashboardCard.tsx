@@ -21,7 +21,7 @@ export function DashboardCard() {
             </div>
           </div>
           <div className="text-xs font-medium text-muted-foreground">
-            Placeholder
+            NASDAQ · Real-time
           </div>
         </div>
 
@@ -29,8 +29,8 @@ export function DashboardCard() {
           <div className="grid grid-cols-3 gap-3">
             {[
               { k: "Signal", v: "Long" },
-              { k: "Confidence", v: "—" },
-              { k: "Regime", v: "—" },
+              { k: "Confidence", v: "87%" },
+              { k: "Regime", v: "Trending" },
             ].map((m) => (
               <div key={m.k} className="rounded-xl bg-surface px-4 py-3">
                 <div className="text-[11px] font-semibold tracking-[0.12em] text-muted-foreground">
@@ -61,11 +61,11 @@ export function DashboardCard() {
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 rounded-full bg-surface px-3 py-1 text-xs font-medium text-muted-foreground">
               <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-              Placeholder alert
+              BUY signal fired
             </span>
             <span className="inline-flex items-center gap-2 rounded-full bg-surface px-3 py-1 text-xs font-medium text-muted-foreground">
               <span className="h-1.5 w-1.5 rounded-full bg-foreground/70" />
-              Placeholder filter
+              Trend confirmed
             </span>
           </div>
         </div>

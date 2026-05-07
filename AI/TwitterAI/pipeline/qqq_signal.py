@@ -25,29 +25,25 @@ from pipeline.match_filter import (
 
 # ---- Equity universe (NDX / QQQ-heavy) ----------------------------------------
 
+# Top-10 QQQ holdings by weight (May 2026). These are the only component stocks
+# we ingest and use as additional QQQ training signal.
 QQQ_CORE_TICKERS: set[str] = {
-    "AAPL",
-    "MSFT",
-    "NVDA",
-    "AMZN",
-    "META",
-    "GOOGL",
-    "GOOG",
-    "TSLA",
-    "AVGO",
-    "AMD",
-    "INTC",
-    "ADBE",
-    "NFLX",
-    "COST",
-    "PEP",
-    "CSCO",
-    "QCOM",
-    "TXN",
-    "AMAT",
-    "MU",
-    "TSM",
+    "NVDA",   # ~8.2-8.6%
+    "AAPL",   # ~7.0-7.6%
+    "MSFT",   # ~5.2-5.6%
+    "AMZN",   # ~4.5-5.1%
+    "GOOGL",  # ~3.4-3.9%
+    "GOOG",   # ~3.2-3.6%
+    "AVGO",   # ~3.0-3.5%
+    "TSLA",   # ~3.3-3.8%
+    "META",   # ~3.0-3.4%
+    "WMT",    # ~3.0-3.4%
 }
+
+# Feature-identity tickers for QQQ-direction training + inference (holdings + Nasdaq-100 ETFs)
+QQQ_TRAINING_MATCH_TICKERS: frozenset[str] = frozenset(QQQ_CORE_TICKERS) | frozenset(
+    {"QQQ", "QQQM"}
+)
 
 # ---- Official / primary handles (normalized, no @) -----------------------------
 

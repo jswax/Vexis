@@ -2,10 +2,14 @@
 Apify actor client — kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest.
 Replaces twitterapi.io as the tweet ingestion backend.
 
-Date sharding (default): Twitter/Apify “Latest” returns the *newest* hits first, so one call
-with maxItems=200 and a 30-day start= filter still yields ~200 tweets from “right now”.
-We split [start, end] into N-day windows (config TWITTERAI_INGEST_DATE_SHARD_DAYS) and run the
-actor once per window (plus sort passes), merging and deduping, so results spread across the range.
+Date sharding (default): Twitter/Apify “Latest” returns the *newest* hits first *within* the
+time window, so one wide window still skews recent. We split [start, end] into N-day windows
+(config TWITTERAI_INGEST_DATE_SHARD_DAYS) and run the actor once per window, merging and deduping.
+
+We still pass **since_time** / **until_time** (Unix strings) for actors that honor them, but this
+scraper’s searchTerms path often ignores those params. Each term is therefore augmented with
+native X/Twitter **since:** / **until:** day operators (until is exclusive end+1), and we drop any
+returned row whose **createdAt** falls outside the inclusive UTC calendar shard.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from config import get_settings
+from scrapers.normalizer import parse_apify_item_created_at
 
 ACTOR_ID = "kaitoeasyapi/twitter-x-data-tweet-scraper-pay-per-result-cheapest"
 MAX_WAIT_SECS = 600  # 10 min hard cap per actor run
@@ -57,6 +62,39 @@ def _parse_iso_date(s: str) -> date:
     return datetime.strptime(s.strip(), "%Y-%m-%d").date()
 
 
+def _inclusive_calendar_bounds(q: IngestQuery) -> tuple[date, date] | None:
+    """
+    Inclusive UTC calendar-day range for the actor time filter.
+    None when the query has no start/end (open-ended search).
+    """
+    if q.start is None and q.end is None:
+        return None
+    today = datetime.now(tz=timezone.utc).date()
+    if q.end is not None:
+        end_d = _parse_iso_date(q.end)
+    else:
+        end_d = today
+    if q.start is not None:
+        start_d = _parse_iso_date(q.start)
+    else:
+        start_d = end_d - timedelta(days=30)
+    if start_d > end_d:
+        start_d, end_d = end_d, start_d
+    return start_d, end_d
+
+
+def _since_until_time_strings(start_d: date, end_d: date) -> tuple[str, str]:
+    """
+    Actor expects since_time / until_time as unix seconds (schema type string).
+    until_time is exclusive: tweets with created_at < until_time.
+    """
+    since_dt = datetime(start_d.year, start_d.month, start_d.day, tzinfo=timezone.utc)
+    until_dt = datetime(end_d.year, end_d.month, end_d.day, tzinfo=timezone.utc) + timedelta(
+        days=1
+    )
+    return str(int(since_dt.timestamp())), str(int(until_dt.timestamp()))
+
+
 def _inclusive_date_shards(start_s: str, end_s: str, shard_days: int) -> list[tuple[str, str]]:
     """
     Partition [start_s, end_s] into non-overlapping inclusive windows of at most shard_days days.
@@ -94,6 +132,60 @@ def _build_all_queries(q: IngestQuery) -> list[str]:
     return queries
 
 
+def _queries_with_twitter_calendar_filters(
+    queries: list[str],
+    start_d: date,
+    end_d: date,
+) -> list[str]:
+    """
+    Append X/Twitter advanced-search day bounds. until: is exclusive (same as _since_until_time_strings).
+    Skip terms that already declare since:/until: so power users are not overridden.
+    """
+    until_exclusive = end_d + timedelta(days=1)
+    suffix = f"since:{start_d.isoformat()} until:{until_exclusive.isoformat()}"
+    out: list[str] = []
+    for q in queries:
+        s = q.strip()
+        low = s.lower()
+        if "since:" in low or "until:" in low:
+            out.append(s)
+            continue
+        out.append(f"{s} {suffix}".strip())
+    return out
+
+
+def _utc_window_bounds(start_d: date, end_d: date) -> tuple[datetime, datetime]:
+    since_dt = datetime(start_d.year, start_d.month, start_d.day, tzinfo=timezone.utc)
+    until_dt = datetime(end_d.year, end_d.month, end_d.day, tzinfo=timezone.utc) + timedelta(
+        days=1
+    )
+    return since_dt, until_dt
+
+
+def _filter_items_by_calendar_window(
+    items: list[dict[str, Any]],
+    start_d: date,
+    end_d: date,
+) -> tuple[list[dict[str, Any]], int]:
+    since_dt, until_dt = _utc_window_bounds(start_d, end_d)
+    kept: list[dict[str, Any]] = []
+    dropped = 0
+    for item in items:
+        created = parse_apify_item_created_at(item)
+        if created is None:
+            dropped += 1
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        else:
+            created = created.astimezone(timezone.utc)
+        if since_dt <= created < until_dt:
+            kept.append(item)
+        else:
+            dropped += 1
+    return kept, dropped
+
+
 def _sort_modes_for_query(q: IngestQuery) -> list[str]:
     if q.sort == "Latest + Top":
         return ["Latest", "Top"]
@@ -124,14 +216,20 @@ def _run_actor(
         run_input["minimumReplies"] = q.minimum_replies
     if q.only_verified_users:
         run_input["onlyVerifiedUsers"] = True
-    if q.start:
-        run_input["start"] = q.start
-    if q.end:
-        run_input["end"] = q.end
+
+    bounds = _inclusive_calendar_bounds(q)
+    if bounds is not None:
+        start_d, end_d = bounds
+        since_ts, until_ts = _since_until_time_strings(start_d, end_d)
+        run_input["since_time"] = since_ts
+        run_input["until_time"] = until_ts
+        log_window = f"{start_d.isoformat()}..{end_d.isoformat()} since_time={since_ts} until_time={until_ts}"
+    else:
+        log_window = "no date window"
 
     print(
         f"[{_ts()}] Apify: actor run ({sort}) terms={len(queries)} maxItems={max_items} "
-        f"start={q.start or '—'} end={q.end or '—'}",
+        f"{log_window}",
         flush=True,
     )
 
@@ -158,6 +256,11 @@ def _gather_unique_items_for_query(client: Any, q: IngestQuery) -> tuple[list[di
     if not queries:
         return [], set()
 
+    bounds = _inclusive_calendar_bounds(q)
+    if bounds is not None:
+        sd, ed = bounds
+        queries = _queries_with_twitter_calendar_filters(queries, sd, ed)
+
     item_cap = q.max_items
     sort_modes = _sort_modes_for_query(q)
     seen_ids: set[str] = set()
@@ -167,7 +270,21 @@ def _gather_unique_items_for_query(client: Any, q: IngestQuery) -> tuple[list[di
         if len(all_items) >= item_cap:
             break
         remaining = item_cap - len(all_items)
-        raw = _run_actor(client, queries, sort_mode, remaining, q)
+        # Window filter can drop most rows if the actor ignores date params; request extra then trim.
+        fetch_n = remaining
+        if bounds is not None:
+            fetch_n = min(max(remaining * 3, remaining + 15), 500)
+
+        raw = _run_actor(client, queries, sort_mode, fetch_n, q)
+        if bounds is not None:
+            sd, ed = bounds
+            raw, n_drop = _filter_items_by_calendar_window(raw, sd, ed)
+            if n_drop:
+                print(
+                    f"[{_ts()}] Apify: dropped {n_drop} items outside {sd.isoformat()}..{ed.isoformat()} UTC",
+                    flush=True,
+                )
+
         for item in raw:
             if len(all_items) >= item_cap:
                 break

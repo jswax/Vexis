@@ -260,6 +260,24 @@ type TweetRow = {
   qqq?: { score: number; reasons: string[]; allowlisted_source: boolean };
 };
 
+const QQQ_DISPLAY_ETFS = new Set(["QQQ", "QQQM"]);
+
+/** Feed / eval UI: show only Nasdaq-100 ETF chips for model context; synthesize QQQ when labels are QQQ but the mention was a top holding. */
+function qqqModelDisplayMatches(tweet: TweetRow): AssetMatch[] {
+  const up = (s: string) => s.toUpperCase();
+  const fromApi = tweet.asset_matches.filter((m) => QQQ_DISPLAY_ETFS.has(up(m.ticker)));
+  if (fromApi.length > 0) return fromApi;
+  const hasQqq =
+    (tweet.predictions?.some((p) => up(p.ticker) === "QQQ") ?? false) ||
+    tweet.outcomes.some((o) => up(o.ticker) === "QQQ");
+  if (hasQqq) return [{ ticker: "QQQ", asset_type: "ETF", confidence: 1 }];
+  return [];
+}
+
+function tweetHasQqqModelData(tweet: TweetRow): boolean {
+  return qqqModelDisplayMatches(tweet).length > 0;
+}
+
 // ─── Model prediction badge ───────────────────────────────────────────────────
 
 function ModelPredBadge({
@@ -309,7 +327,7 @@ function TweetCard({ tweet }: { tweet: TweetRow }) {
       })
     : null;
 
-  const tickers = [...new Set(tweet.asset_matches.map((m) => m.ticker))];
+  const displayMatches = qqqModelDisplayMatches(tweet);
 
   const bestOutcome = tweet.outcomes.reduce<TweetOutcomeSummary | null>((best, o) => {
     if (!best || Math.abs(o.impact_score ?? 0) > Math.abs(best.impact_score ?? 0)) return o;
@@ -414,24 +432,21 @@ function TweetCard({ tweet }: { tweet: TweetRow }) {
         {tweet.text}
       </p>
 
-      {/* Asset chips */}
-      {tickers.length > 0 && (
+      {/* Asset chips (QQQ / QQQM only — model predicts QQQ direction) */}
+      {displayMatches.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {tickers.map((t) => {
-            const m = tweet.asset_matches.find((a) => a.ticker === t)!;
-            return (
-              <span
-                key={t}
-                className="inline-flex items-center rounded-full border border-border bg-surface px-2.5 py-0.5 text-xs font-semibold text-foreground"
-              >
-                {m.asset_type === "CRYPTO" ? "₿ " : "$ "}
-                {t}
-                <span className="ml-1 text-muted-foreground font-normal">
-                  {Math.round(m.confidence * 100)}%
-                </span>
+          {displayMatches.map((m) => (
+            <span
+              key={`${m.ticker}-${m.confidence}`}
+              className="inline-flex items-center rounded-full border border-border bg-surface px-2.5 py-0.5 text-xs font-semibold text-foreground"
+            >
+              {m.asset_type === "CRYPTO" ? "₿ " : "$ "}
+              {m.ticker}
+              <span className="ml-1 text-muted-foreground font-normal">
+                {Math.round(m.confidence * 100)}%
               </span>
-            );
-          })}
+            </span>
+          ))}
         </div>
       )}
 
@@ -459,22 +474,22 @@ function TweetCard({ tweet }: { tweet: TweetRow }) {
         >
           View →
         </a>
-        {(tweet.outcomes.length > 0 || (tweet.predictions ?? []).length > 0) && (
+        {tweetHasQqqModelData(tweet) && (
           <button
             onClick={() => setExpanded((e) => !e)}
             className="text-muted-foreground hover:text-foreground transition"
           >
             {expanded
               ? "Hide ▲"
-              : tweet.outcomes.length > 0
-              ? `Outcomes (${tweet.outcomes.length}) ▼`
-              : `Predictions (${(tweet.predictions ?? []).length}) ▼`}
+              : tweet.outcomes.filter((o) => o.ticker.toUpperCase() === "QQQ").length > 0
+              ? `QQQ outcomes (${tweet.outcomes.filter((o) => o.ticker.toUpperCase() === "QQQ").length}) ▼`
+              : `QQQ predictions (${(tweet.predictions ?? []).filter((p) => p.ticker.toUpperCase() === "QQQ").length}) ▼`}
           </button>
         )}
       </div>
 
       {/* Expanded outcomes + predictions table */}
-      {expanded && (tweet.outcomes.length > 0 || (tweet.predictions ?? []).length > 0) && (
+      {expanded && tweetHasQqqModelData(tweet) && (
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-xs border-collapse">
             <thead>
@@ -489,7 +504,7 @@ function TweetCard({ tweet }: { tweet: TweetRow }) {
               </tr>
             </thead>
             <tbody>
-              {tickers.map((ticker) => {
+              {[...new Set(displayMatches.map((m) => m.ticker))].map((ticker) => {
                 const byHorizon = Object.fromEntries(
                   tweet.outcomes
                     .filter((o) => o.ticker === ticker)
@@ -576,6 +591,60 @@ function TweetCard({ tweet }: { tweet: TweetRow }) {
   );
 }
 
+// ─── Stats table ──────────────────────────────────────────────────────────────
+
+type SectionTotals = {
+  uncomputed: number;
+  no_match: number;
+  impact_1_5: number;
+  impact_5_8: number;
+  impact_8_10: number;
+  predicted: number;
+  in_sample: number;
+};
+
+function StatsTable({ totals, total }: { totals: SectionTotals | null; total: number | null }) {
+  const computed = total != null && totals != null ? total - totals.uncomputed : null;
+  const outOfSample = total != null && totals?.in_sample != null ? total - totals.in_sample : null;
+
+  const cols: { label: string; value: number | null; highlight?: string }[] = [
+    { label: "Total tweets", value: total },
+    { label: "Outcomes computed", value: computed },
+    { label: "Needs compute", value: totals?.uncomputed ?? null, highlight: (totals?.uncomputed ?? 0) > 0 ? "text-amber-600" : undefined },
+    { label: "No ticker match", value: totals?.no_match ?? null, highlight: (totals?.no_match ?? 0) > 0 ? "text-muted-foreground" : undefined },
+    { label: "In training data", value: totals?.in_sample ?? null },
+    { label: "Out-of-sample", value: outOfSample },
+    { label: "Have predictions", value: totals?.predicted ?? null },
+  ];
+
+  return (
+    <div className="rounded-xl border border-border bg-white overflow-hidden shadow-sm">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b border-border bg-surface">
+            {cols.map((c) => (
+              <th key={c.label} className="py-2 px-4 text-left text-xs font-semibold tracking-wide text-muted-foreground whitespace-nowrap">
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            {cols.map((c) => (
+              <td key={c.label} className={`py-3 px-4 text-sm font-semibold ${c.highlight ?? "text-foreground"}`}>
+                {c.value == null
+                  ? <span className="text-muted-foreground font-normal animate-pulse">—</span>
+                  : c.value.toLocaleString()}
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ─── Feed section ─────────────────────────────────────────────────────────────
 
 function FeedSection() {
@@ -585,68 +654,31 @@ function FeedSection() {
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState<number | null>(null);
-  const [sectionTotals, setSectionTotals] = useState<{
-    uncomputed: number;
-    impact_1_5: number;
-    impact_5_8: number;
-    impact_8_10: number;
-  } | null>(null);
+  const [sectionTotals, setSectionTotals] = useState<SectionTotals | null>(null);
   const [ticker, setTicker] = useState("");
   const [tickerFilter, setTickerFilter] = useState("");
-  const [qqqMode, setQqqMode] = useState(true);
-  const [section, setSection] = useState<
-    "all" | "uncomputed" | "impact_1_5" | "impact_5_8" | "impact_8_10" | "most_recent"
-  >("all");
-  const currentSortRef = useRef<"default" | "recent">("default");
-  const LIMIT = 20;
-
-  function maxAbsImpact(t: TweetRow): number {
-    const impacts = t.outcomes
-      .map((o) => (o.impact_score == null ? 0 : Math.abs(o.impact_score)))
-      .filter((n) => Number.isFinite(n));
-    return impacts.length ? Math.max(...impacts) : 0;
-  }
-
-  function inSection(t: TweetRow): boolean {
-    const max = maxAbsImpact(t);
-    const computed = t.outcomes.length > 0;
-    if (section === "all" || section === "most_recent") return true;
-    if (section === "uncomputed") return !computed;
-    if (!computed) return false;
-    if (section === "impact_1_5") return max >= 1 && max < 5;
-    if (section === "impact_5_8") return max >= 5 && max < 8;
-    if (section === "impact_8_10") return max >= 8 && max <= 10;
-    return true;
-  }
-
-  const filteredTweets = tweets.filter(inSection);
-
+  const [qqqMode, setQqqMode] = useState(false);
+  const LIMIT = 50;
   const load = useCallback(
-    async (reset: boolean, sort: "default" | "recent" = "default") => {
+    async (reset: boolean) => {
       setLoading(true);
       setError(null);
       const nextOffset = reset ? 0 : offset;
       try {
-        const params = new URLSearchParams({ limit: String(LIMIT), offset: String(nextOffset) });
+        const params = new URLSearchParams({
+          limit: String(LIMIT),
+          offset: String(nextOffset),
+          sort: "recent",
+        });
         if (tickerFilter) params.set("ticker", tickerFilter);
         if (qqqMode) params.set("qqq", "1");
-        if (sort === "recent") params.set("sort", "recent");
         const res = await fetch(`/api/twitterai/tweets?${params.toString()}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
         const rows: TweetRow[] = data.tweets ?? [];
-        const totalRows: number | null =
-          typeof data.total === "number" && Number.isFinite(data.total) ? data.total : null;
-        if (totalRows != null) setTotal(totalRows);
+        if (typeof data.total === "number" && Number.isFinite(data.total)) setTotal(data.total);
         if (data.section_totals && typeof data.section_totals === "object") {
-          const st = data.section_totals as Record<string, unknown>;
-          const next = {
-            uncomputed: Number(st.uncomputed ?? 0) || 0,
-            impact_1_5: Number(st.impact_1_5 ?? 0) || 0,
-            impact_5_8: Number(st.impact_5_8 ?? 0) || 0,
-            impact_8_10: Number(st.impact_8_10 ?? 0) || 0,
-          };
-          setSectionTotals(next);
+          setSectionTotals(data.section_totals as SectionTotals);
         }
         setTweets((prev) => (reset ? rows : [...prev, ...rows]));
         setOffset(nextOffset + rows.length);
@@ -670,15 +702,16 @@ function FeedSection() {
   }, []);
 
   function applyFilter() {
-    setTickerFilter(ticker.toUpperCase().trim());
+    const next = ticker.toUpperCase().trim();
+    setTickerFilter(next);
     setOffset(0);
     setHasMore(true);
     setTweets([]);
     setTotal(null);
     setSectionTotals(null);
     setLoading(true);
-    const params = new URLSearchParams({ limit: String(LIMIT), offset: "0" });
-    if (ticker.trim()) params.set("ticker", ticker.toUpperCase().trim());
+    const params = new URLSearchParams({ limit: String(LIMIT), offset: "0", sort: "recent" });
+    if (next) params.set("ticker", next);
     if (qqqMode) params.set("qqq", "1");
     fetch(`/api/twitterai/tweets?${params.toString()}`)
       .then((r) => r.json())
@@ -687,41 +720,43 @@ function FeedSection() {
         setTweets(rows);
         setOffset(rows.length);
         setHasMore(rows.length === LIMIT);
-        if (typeof data.total === "number" && Number.isFinite(data.total)) {
-          setTotal(data.total);
-        }
-        if (data.section_totals && typeof data.section_totals === "object") {
-          const st = data.section_totals as Record<string, unknown>;
-          setSectionTotals({
-            uncomputed: Number(st.uncomputed ?? 0) || 0,
-            impact_1_5: Number(st.impact_1_5 ?? 0) || 0,
-            impact_5_8: Number(st.impact_5_8 ?? 0) || 0,
-            impact_8_10: Number(st.impact_8_10 ?? 0) || 0,
-          });
-        }
+        if (typeof data.total === "number" && Number.isFinite(data.total)) setTotal(data.total);
+        if (data.section_totals) setSectionTotals(data.section_totals as SectionTotals);
         setError(null);
       })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
   }
 
-  function handleSectionChange(id: typeof section) {
-    const newSort = id === "most_recent" ? "recent" : "default";
-    const sortChanged = newSort !== currentSortRef.current;
-    currentSortRef.current = newSort;
-    setSection(id);
-    if (sortChanged) {
-      setTweets([]);
-      setOffset(0);
-      setHasMore(true);
-      setTotal(null);
-      setSectionTotals(null);
-      load(true, newSort);
-    }
+  function clearFilter() {
+    setTicker("");
+    setTickerFilter("");
+    setOffset(0);
+    setTweets([]);
+    setHasMore(true);
+    setTotal(null);
+    setSectionTotals(null);
+    setLoading(true);
+    const params = new URLSearchParams({ limit: String(LIMIT), offset: "0", sort: "recent" });
+    if (qqqMode) params.set("qqq", "1");
+    fetch(`/api/twitterai/tweets?${params.toString()}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const rows: TweetRow[] = data.tweets ?? [];
+        setTweets(rows);
+        setOffset(rows.length);
+        setHasMore(rows.length === LIMIT);
+        if (typeof data.total === "number") setTotal(data.total);
+        if (data.section_totals) setSectionTotals(data.section_totals as SectionTotals);
+      })
+      .catch((err) => setError(String(err)))
+      .finally(() => setLoading(false));
   }
 
   return (
     <div className="grid gap-4">
+      <StatsTable totals={sectionTotals} total={total} />
+
       <div className="flex items-center gap-3">
         <input
           className={`${inputCls} w-40`}
@@ -733,50 +768,46 @@ function FeedSection() {
         <button onClick={applyFilter} className={secondaryBtnCls}>
           Filter
         </button>
-
+        {tickerFilter && (
+          <button onClick={clearFilter} className="text-sm text-muted-foreground hover:text-foreground">
+            Clear
+          </button>
+        )}
         <label className="ml-2 flex items-center gap-2 text-xs text-muted-foreground">
           <input
             type="checkbox"
             checked={qqqMode}
             onChange={(e) => {
-              setQqqMode(e.target.checked);
+              const next = e.target.checked;
+              setQqqMode(next);
               setOffset(0);
               setTweets([]);
               setHasMore(true);
-              // reload with new mode
-              setTimeout(() => load(true), 0);
-            }}
-            className="h-4 w-4 rounded border-border"
-          />
-          QQQ mode
-        </label>
-        {tickerFilter && (
-          <button
-            onClick={() => {
-              setTicker("");
-              setTickerFilter("");
-              setOffset(0);
-              setTweets([]);
-              setHasMore(true);
+              setTotal(null);
+              setSectionTotals(null);
               setLoading(true);
-              fetch(`/api/twitterai/tweets?limit=${LIMIT}&offset=0`)
+              const params = new URLSearchParams({ limit: String(LIMIT), offset: "0", sort: "recent" });
+              if (tickerFilter) params.set("ticker", tickerFilter);
+              if (next) params.set("qqq", "1");
+              fetch(`/api/twitterai/tweets?${params.toString()}`)
                 .then((r) => r.json())
                 .then((data) => {
                   const rows: TweetRow[] = data.tweets ?? [];
                   setTweets(rows);
                   setOffset(rows.length);
                   setHasMore(rows.length === LIMIT);
+                  if (typeof data.total === "number") setTotal(data.total);
+                  if (data.section_totals) setSectionTotals(data.section_totals as SectionTotals);
                 })
                 .catch((err) => setError(String(err)))
                 .finally(() => setLoading(false));
             }}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Clear
-          </button>
-        )}
+            className="h-4 w-4 rounded border-border"
+          />
+          QQQ mode
+        </label>
         <button
-          onClick={() => load(true, currentSortRef.current)}
+          onClick={() => load(true)}
           disabled={loading}
           className="ml-auto text-sm text-muted-foreground hover:text-foreground disabled:opacity-40"
         >
@@ -785,52 +816,24 @@ function FeedSection() {
       </div>
 
       <div className="text-xs text-muted-foreground">
-        Loaded <span className="font-semibold text-foreground">{tweets.length}</span> /{" "}
-        <span className="font-semibold text-foreground">
-          {total == null ? "…" : total}
-        </span>{" "}
-        matching tweets (page size {LIMIT}).
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {(
-          [
-            { id: "all", label: "All", count: total ?? tweets.length },
-            { id: "most_recent", label: "Most Recent", count: total ?? tweets.length },
-            { id: "uncomputed", label: "Not computed", count: sectionTotals?.uncomputed ?? 0 },
-            { id: "impact_1_5", label: "|impact| 1–5", count: sectionTotals?.impact_1_5 ?? 0 },
-            { id: "impact_5_8", label: "|impact| 5–8", count: sectionTotals?.impact_5_8 ?? 0 },
-            { id: "impact_8_10", label: "|impact| 8–10", count: sectionTotals?.impact_8_10 ?? 0 },
-          ] as const
-        ).map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => handleSectionChange(s.id)}
-            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-              section === s.id
-                ? "border-foreground/20 bg-foreground/5 text-foreground"
-                : "border-border bg-white text-muted-foreground hover:text-foreground hover:border-foreground/20"
-            }`}
-          >
-            <span>{s.label}</span>
-            <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-muted-foreground font-mono">
-              {s.count}
-            </span>
-          </button>
-        ))}
+        Showing{" "}
+        <span className="font-semibold text-foreground">{tweets.length.toLocaleString()}</span>
+        {total != null && (
+          <> of <span className="font-semibold text-foreground">{total.toLocaleString()}</span></>
+        )}{" "}
+        tweets
       </div>
 
       <ErrorBox msg={error} />
 
-      {filteredTweets.length === 0 && !loading && (
+      {tweets.length === 0 && !loading && (
         <div className="rounded-2xl border border-dashed border-border bg-surface py-16 text-center text-sm text-muted-foreground">
-          No tweets in this section — try a different filter or run an ingest.
+          No tweets found — try running an ingest.
         </div>
       )}
 
       <div className="grid gap-3">
-        {filteredTweets.map((t) => (
+        {tweets.map((t) => (
           <TweetCard key={t.id} tweet={t} />
         ))}
       </div>
@@ -843,7 +846,7 @@ function FeedSection() {
 
       {!loading && hasMore && tweets.length > 0 && (
         <div className="flex justify-center">
-          <button onClick={() => load(false, currentSortRef.current)} className={secondaryBtnCls}>
+          <button onClick={() => load(false)} className={secondaryBtnCls}>
             Load more
           </button>
         </div>
@@ -2226,6 +2229,8 @@ function HorizonCell({
   );
 }
 
+type TestEvalByHorizon = Record<string, { correct: number; total: number }>;
+
 function TestEvalSection() {
   const [tweets, setTweets] = useState<TweetRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2233,7 +2238,9 @@ function TestEvalSection() {
   const [total, setTotal] = useState<number | null>(null);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const LIMIT = 30;
+  /** Full test-set counts from API (all tweets past train cutoff), not just the current page */
+  const [serverEvalByHorizon, setServerEvalByHorizon] = useState<TestEvalByHorizon | null>(null);
+  const LIMIT = 20;
 
   async function load(reset: boolean) {
     setLoading(true);
@@ -2250,6 +2257,8 @@ function TestEvalSection() {
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       const rows: TweetRow[] = data.tweets ?? [];
       if (typeof data.total === "number") setTotal(data.total);
+      const te = data.test_eval_by_horizon as TestEvalByHorizon | undefined;
+      if (te && typeof te === "object") setServerEvalByHorizon(te);
       setTweets((prev) => (reset ? rows : [...prev, ...rows]));
       setOffset(nextOffset + rows.length);
       setHasMore(rows.length === LIMIT);
@@ -2269,47 +2278,49 @@ function TestEvalSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Compute per-horizon accuracy stats
-  const stats: Record<string, { correct: number; total: number }> = {};
+  // Client-side fallback if API omits test_eval_by_horizon (older TwitterAI build)
+  const clientStats: TestEvalByHorizon = {};
   for (const h of EVAL_HORIZONS) {
-    stats[h] = { correct: 0, total: 0 };
+    clientStats[h] = { correct: 0, total: 0 };
   }
   for (const tweet of tweets) {
-    const tickers = [...new Set(tweet.asset_matches.map((m) => m.ticker))];
-    for (const ticker of tickers) {
-      const predsByH = Object.fromEntries(
-        (tweet.predictions ?? []).filter((p) => p.ticker === ticker).map((p) => [p.horizon, p])
-      );
-      const actualByH = Object.fromEntries(
-        tweet.outcomes.filter((o) => o.ticker === ticker).map((o) => [o.horizon, o])
-      );
-      for (const h of EVAL_HORIZONS) {
-        const pred = predsByH[h]?.direction_pred;
-        const actual = actualByH[h]?.direction_label;
-        if (pred && actual) {
-          stats[h].total++;
-          if (pred === actual) stats[h].correct++;
-        }
+    const ticker = "QQQ";
+    const predsByH = Object.fromEntries(
+      (tweet.predictions ?? []).filter((p) => p.ticker === ticker).map((p) => [p.horizon, p])
+    );
+    const actualByH = Object.fromEntries(
+      tweet.outcomes.filter((o) => o.ticker === ticker).map((o) => [o.horizon, o])
+    );
+    for (const h of EVAL_HORIZONS) {
+      const pred = predsByH[h]?.direction_pred;
+      const actual = actualByH[h]?.direction_label;
+      if (pred && actual) {
+        clientStats[h].total++;
+        if (pred === actual) clientStats[h].correct++;
       }
     }
   }
+
+  const stats: TestEvalByHorizon =
+    serverEvalByHorizon ??
+    clientStats;
 
   return (
     <SectionCard label="TEST SET EVALUATION">
       <div className="flex items-center justify-between gap-3 mb-4">
         <p className="text-sm text-muted-foreground">
-          Out-of-sample tweets (same temporal cutoff as training: newest ~20% by post time). Each column is a horizon; cells show model direction, actual direction with realized return, and a match badge when both exist.
+          Out-of-sample tweets (same temporal cutoff as training: newest ~20% by post time). The horizon tiles count <span className="font-semibold text-foreground">every</span> test tweet with both a QQQ prediction and outcome for that horizon (not just the rows below). The table loads {LIMIT} tweets per page.
         </p>
         <button onClick={() => load(true)} disabled={loading} className={secondaryBtnCls}>
           {loading ? "Loading…" : "Refresh"}
         </button>
       </div>
 
-      {/* Accuracy summary bar */}
-      {tweets.length > 0 && (
+      {/* Accuracy summary — full test set from API when available */}
+      {(serverEvalByHorizon != null || tweets.length > 0) && (
         <div className="mb-4 flex flex-wrap gap-2">
           {EVAL_HORIZONS.map((h) => {
-            const s = stats[h];
+            const s = stats[h] ?? { correct: 0, total: 0 };
             const acc = s.total > 0 ? (s.correct / s.total) * 100 : null;
             return (
               <div
@@ -2378,7 +2389,7 @@ function TestEvalSection() {
             </thead>
             <tbody>
               {tweets.map((tweet) => {
-                const tickers = [...new Set(tweet.asset_matches.map((m) => m.ticker))];
+                const tickers = ["QQQ"];
                 return tickers.map((ticker, ti) => {
                   const predsByH = Object.fromEntries(
                     (tweet.predictions ?? [])

@@ -1,13 +1,13 @@
 import { Container } from "@/components/Container";
 
 const logos = [
-  "Placeholder",
-  "Placeholder",
-  "Placeholder",
-  "Placeholder",
-  "Placeholder",
-  "Placeholder",
-  "Placeholder",
+  "Forex",
+  "Crypto",
+  "Futures",
+  "Equities",
+  "Options",
+  "Indices",
+  "Commodities",
 ];
 
 export function LogoMarquee() {
@@ -16,7 +16,7 @@ export function LogoMarquee() {
       <Container>
         <div className="py-12">
           <div className="text-sm font-medium text-muted-foreground">
-            Trusted by traders worldwide
+            Works across all markets
           </div>
 
           <div className="mt-6 overflow-hidden">

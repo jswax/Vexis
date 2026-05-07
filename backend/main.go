@@ -99,6 +99,7 @@ func main() {
 
 	routes.RegisterAuth(engine, database, &cfg)
 	routes.RegisterAlerts(engine, database, cfg.TradingViewWebhookURL, cfg.AlertSecret)
+	routes.RegisterPayments(engine, database, &cfg)
 
 	port := cfg.Port
 	if port == "" {

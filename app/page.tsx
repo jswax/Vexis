@@ -26,7 +26,7 @@ export default function Home() {
                 Pricing that scales with conviction.
               </h2>
               <p className="mt-4 text-base text-muted-foreground sm:text-lg">
-                Placeholder copy. Free and Pro. No payments wired up.
+                Simple, transparent pricing. No hidden fees. Cancel anytime.
               </p>
             </div>
 

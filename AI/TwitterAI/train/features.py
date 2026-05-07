@@ -19,17 +19,16 @@ import re
 from datetime import datetime
 from typing import Any
 
+from pipeline.qqq_signal import QQQ_CORE_TICKERS as _QQQ_TOP_HOLDINGS_RAW
+
 # ── Shared constants ───────────────────────────────────────────────────────────
 
 HORIZONS_ORDERED: list[str] = ["M5", "M15", "M30", "H1", "H4", "H6", "D1"]
 HORIZON_TO_IDX: dict[str, int] = {h: i for i, h in enumerate(HORIZONS_ORDERED)}
 
-QQQ_CORE_TICKERS: list[str] = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "TSLA", "AVGO",
-    "AMD", "INTC", "ADBE", "NFLX", "COST", "PEP", "CSCO", "QCOM", "TXN",
-    "AMAT", "MU", "TSM",
-]
-QQQ_CORE_SET: frozenset[str] = frozenset(QQQ_CORE_TICKERS)
+# Top QQQ holdings only (same universe as ingest outcomes → QQQ labels); stable OHE column order
+QQQ_TOP_HOLDINGS: tuple[str, ...] = tuple(sorted(_QQQ_TOP_HOLDINGS_RAW))
+QQQ_CORE_SET: frozenset[str] = frozenset(QQQ_TOP_HOLDINGS)
 QQQ_ETF_SET: frozenset[str] = frozenset({"QQQ", "QQQM"})
 INDEX_SET: frozenset[str] = frozenset({"SPY"})
 
@@ -51,11 +50,8 @@ DIRECTION_LABELS: list[str] = ["NEUTRAL", "BULLISH", "BEARISH"]
 LABEL_TO_IDX: dict[str, int] = {l: i for i, l in enumerate(DIRECTION_LABELS)}
 IDX_TO_LABEL: dict[int, str] = {i: l for l, i in LABEL_TO_IDX.items()}
 
-# Top individual tickers to one-hot (most frequent in QQQ discourse)
-TOP_TICKERS_OHE: list[str] = [
-    "NVDA", "AAPL", "MSFT", "TSLA", "META",
-    "AMZN", "GOOGL", "AMD", "NFLX", "INTC", "AVGO", "QCOM",
-]
+# One-hot columns for each top holding (aligned with QQQ_CORE_TICKERS in qqq_signal)
+TOP_TICKERS_OHE: list[str] = list(QQQ_TOP_HOLDINGS)
 
 # QQQ text channel names (must match keys in pipeline/qqq_signal.py)
 CHANNEL_NAMES: list[str] = [

@@ -8,17 +8,17 @@ const steps = [
   {
     n: "01",
     t: "Install",
-    d: "Placeholder copy describing how a trader gets started quickly.",
+    d: "Add the indicator to your TradingView account using your access key. Works on any chart, any asset, any timeframe.",
   },
   {
     n: "02",
     t: "Configure",
-    d: "Placeholder copy describing calibration for a specific market.",
+    d: "Set your preferred timeframe, alert channels, and risk parameters. The indicator adapts to your trading style.",
   },
   {
     n: "03",
     t: "Execute",
-    d: "Placeholder copy describing disciplined, signal-driven execution.",
+    d: "Follow clear buy and sell signals with no ambiguity. Clean entries, clean exits — disciplined execution by design.",
   },
 ];
 
@@ -35,8 +35,7 @@ export function HowItWorks() {
               A timeline built for momentum.
             </h2>
             <p className="mt-4 text-base text-muted-foreground sm:text-lg">
-              Placeholder copy. Horizontal on desktop, vertical on mobile. The
-              connecting line draws in on scroll.
+              From TradingView to your first signal in minutes.
             </p>
           </div>
 

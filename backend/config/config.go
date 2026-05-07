@@ -30,6 +30,12 @@ type Config struct {
 	SMTPUser       string
 	SMTPPassword   string
 	FromEmail      string
+
+	// Stripe — optional; payments are disabled when StripeSecretKey is empty.
+	StripeSecretKey       string
+	StripeWebhookSecret   string
+	StripeStandardPriceID string
+	StripePremiumPriceID  string
 }
 
 func envTruthy(key string) bool {
@@ -78,6 +84,11 @@ func Load() (Config, error) {
 		SMTPUser:       os.Getenv("SMTP_USER"),
 		SMTPPassword:   os.Getenv("SMTP_PASSWORD"),
 		FromEmail:      strings.TrimSpace(os.Getenv("FROM_EMAIL")),
+
+		StripeSecretKey:       strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")),
+		StripeWebhookSecret:   strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")),
+		StripeStandardPriceID: strings.TrimSpace(os.Getenv("STRIPE_STANDARD_PRICE_ID")),
+		StripePremiumPriceID:  strings.TrimSpace(os.Getenv("STRIPE_PREMIUM_PRICE_ID")),
 	}
 
 	if cfg.DatabaseURL == "" {
