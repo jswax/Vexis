@@ -145,3 +145,4 @@ In rough priority order, to be brainstormed and spec'd separately when ready:
 7. Multi-timeframe (display HTF FVGs on LTF chart)
 8. Strategy version (entries/exits + backtest)
 9. Webhook-out → backend fusion with NewsAI signals → combined buy/sell signal back to TV
+ 

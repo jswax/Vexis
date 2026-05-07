@@ -26,6 +26,7 @@ export function Navbar() {
     if (authed) {
       base.push({ href: "/profile", label: "Profile" });
       base.push({ href: "/dashboard", label: "Dashboard" });
+      base.push({ href: "/indicator", label: "Indicator" });
       if (isAdmin) {
         base.push({ href: "/twitter", label: "Twitter AI" });
         base.push({ href: "/admin", label: "Admin" });
