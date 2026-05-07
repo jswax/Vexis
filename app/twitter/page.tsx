@@ -2,6 +2,8 @@
 
 import { Container } from "@/components/Container";
 import { PageHeader } from "@/components/PageHeader";
+import { apiFetch } from "@/lib/api";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -2498,7 +2500,26 @@ function ModelSection() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function TwitterPage() {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("feed");
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    apiFetch<{ is_admin: boolean }>("/auth/me")
+      .then((me) => {
+        if (!me.is_admin) router.replace("/dashboard");
+        else setReady(true);
+      })
+      .catch(() => router.replace("/login"));
+  }, [router]);
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+      </div>
+    );
+  }
 
   return (
     <div>
