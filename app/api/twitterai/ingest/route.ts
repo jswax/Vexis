@@ -4,7 +4,7 @@ import { fetchTwitterAiLong } from "@/lib/twitteraiProxyFetch";
 
 export const runtime = "nodejs";
 // Ingest can take several minutes (twitterapi.io pagination + free-tier pacing).
-export const maxDuration = 900;
+export const maxDuration = 300;
 
 const TWITTER_AI_URL =
   process.env.TWITTER_AI_URL || "http://localhost:4001";

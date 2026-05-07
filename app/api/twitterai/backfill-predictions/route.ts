@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { fetchTwitterAiLong } from "@/lib/twitteraiProxyFetch";
 
 export const runtime = "nodejs";
-export const maxDuration = 900;
+export const maxDuration = 300;
 
 const TWITTER_AI_URL = process.env.TWITTER_AI_URL || "http://localhost:4001";
 const TWITTERAI_TOKEN = process.env.TWITTERAI_TOKEN;
