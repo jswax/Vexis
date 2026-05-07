@@ -8,21 +8,21 @@ import { motion } from "framer-motion";
 const features = [
   {
     n: "01",
-    title: "Placeholder feature",
-    desc: "Placeholder copy describing a world-class feature with a data-driven feel.",
+    title: "Multi-Timeframe Confluence",
+    desc: "Signals are validated across multiple timeframes before triggering — filtering out noise and surfacing only the highest-probability setups.",
     Icon: BarChart3,
   },
   {
     n: "02",
-    title: "Placeholder feature",
-    desc: "Placeholder copy describing a world-class feature with a data-driven feel.",
-    Icon: CandlestickChart,
+    title: "Smart Regime Detection",
+    desc: "The indicator reads market structure in real time — trending, ranging, or volatile — and adapts signal sensitivity to match current conditions.",
+    Icon: Radar,
   },
   {
     n: "03",
-    title: "Placeholder feature",
-    desc: "Placeholder copy describing a world-class feature with a data-driven feel.",
-    Icon: Radar,
+    title: "Instant Alerts",
+    desc: "Get notified on TradingView, email, or webhook the moment a signal fires. Never miss an entry waiting on a chart.",
+    Icon: CandlestickChart,
   },
 ];
 
@@ -43,8 +43,7 @@ export function Features() {
               </span>
             </h2>
             <p className="mt-4 text-base text-muted-foreground sm:text-lg">
-              Placeholder body copy. No borders, just whitespace, tight
-              typography, and soft shadows.
+              Everything you need to trade with confidence. Nothing you don&apos;t.
             </p>
           </div>
 

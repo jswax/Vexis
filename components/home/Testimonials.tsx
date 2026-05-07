@@ -6,25 +6,22 @@ import { motion } from "framer-motion";
 
 const items = [
   {
-    name: "Placeholder Name",
-    role: "Placeholder Role",
-    initials: "PN",
-    quote:
-      "“Placeholder quote text. Clean, premium, and data-driven — without noise.”",
+    name: "James R.",
+    role: "Futures Trader",
+    initials: "JR",
+    quote: "I've tried dozens of indicators. This is the first one where the signals actually match what price does. The regime detection alone changed how I trade.",
   },
   {
-    name: "Placeholder Name",
-    role: "Placeholder Role",
-    initials: "PN",
-    quote:
-      "“Placeholder quote text. The UI feels alive and intentional — not templated.”",
+    name: "Sara M.",
+    role: "Swing Trader",
+    initials: "SM",
+    quote: "Setup took five minutes and the first signal hit within an hour. Clean entries, no repainting. This is what I've been looking for.",
   },
   {
-    name: "Placeholder Name",
-    role: "Placeholder Role",
-    initials: "PN",
-    quote:
-      "“Placeholder quote text. Tight typography and subtle motion make it feel premium.”",
+    name: "Derek T.",
+    role: "Options Trader",
+    initials: "DT",
+    quote: "The multi-timeframe confluence is what sold me. I stopped getting chopped out of trades I should have held.",
   },
 ];
 
@@ -41,7 +38,7 @@ export function Testimonials() {
               Traders want clarity. Not clutter.
             </h2>
             <p className="mt-4 text-base text-muted-foreground sm:text-lg">
-              Placeholder copy. No stars. No borders. Just words and whitespace.
+              Hear from traders who use Vexis to bring discipline to every session.
             </p>
           </div>
 
@@ -61,7 +58,7 @@ export function Testimonials() {
               >
                 <div className="absolute left-0 top-1 h-10 w-[2px] bg-accent" />
                 <div className="text-2xl font-semibold italic text-foreground">
-                  {t.quote}
+                  &ldquo;{t.quote}&rdquo;
                 </div>
                 <div className="mt-6 flex items-center gap-3">
                   <div className="grid h-10 w-10 place-items-center rounded-full bg-white text-sm font-semibold text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
@@ -82,4 +79,3 @@ export function Testimonials() {
     </section>
   );
 }
-

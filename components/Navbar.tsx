@@ -19,26 +19,32 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [authed, setAuthed] = useState(false);
   const [plan, setPlan] = useState<"free" | "pro" | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const items = useMemo(() => {
     const base = [...navPublic];
     if (authed) {
       base.push({ href: "/profile", label: "Profile" });
       base.push({ href: "/dashboard", label: "Dashboard" });
-      base.push({ href: "/twitter", label: "Twitter AI" });
+      if (isAdmin) {
+        base.push({ href: "/twitter", label: "Twitter AI" });
+        base.push({ href: "/admin", label: "Admin" });
+      }
     }
     return base;
-  }, [authed]);
+  }, [authed, isAdmin]);
 
   useEffect(() => {
     const check = async () => {
       try {
-        const me = await apiFetch<{ plan: string }>("/auth/me");
+        const me = await apiFetch<{ plan: string; is_admin: boolean }>("/auth/me");
         setAuthed(true);
         setPlan(me.plan === "pro" ? "pro" : "free");
+        setIsAdmin(!!me.is_admin);
       } catch {
         setAuthed(false);
         setPlan(null);
+        setIsAdmin(false);
       }
     };
     check();

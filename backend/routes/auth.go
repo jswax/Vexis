@@ -125,7 +125,6 @@ func RegisterAuth(r *gin.Engine, database *gorm.DB, cfg *config.Config) {
 
 	pub.POST("/register", middleware.RateLimitPerIP(10, time.Minute), registerHandler(database, cfg))
 	pub.POST("/login", middleware.RateLimitPerIP(10, time.Minute), loginHandler(database, cfg))
-	pub.POST("/verify-otp", middleware.RateLimitPerIP(30, time.Minute), verifyOTPHandler(database, cfg))
 	pub.GET("/verify-email", verifyEmailHandler(database, cfg))
 	pub.POST("/forgot-password", middleware.RateLimitPerIP(5, time.Minute), forgotPasswordHandler(database, cfg))
 	pub.POST("/reset-password", resetPasswordHandler(database, cfg))
@@ -138,16 +137,13 @@ func RegisterAuth(r *gin.Engine, database *gorm.DB, cfg *config.Config) {
 		pvt.POST("/auth/logout", logoutHandler(database))
 		pvt.POST("/auth/change-password", changePasswordHandler(database, cfg))
 		pvt.POST("/auth/profile/tradingview", profileTradingviewHandler(database))
-		pvt.POST("/auth/profile/phone-request", profilePhoneRequestHandler(database, cfg))
-		pvt.POST("/auth/profile/phone-verify", profilePhoneVerifyHandler(database, cfg))
 	}
 }
 
 type registerBody struct {
-	Email                string  `json:"email"`
-	Password             string  `json:"password"`
-	PhoneNumber          string  `json:"phone_number"`
-	TradingviewUsername  *string `json:"tradingview_username"`
+	Email               string  `json:"email"`
+	Password            string  `json:"password"`
+	TradingviewUsername *string `json:"tradingview_username"`
 }
 
 func registerHandler(database *gorm.DB, cfg *config.Config) gin.HandlerFunc {
@@ -159,10 +155,6 @@ func registerHandler(database *gorm.DB, cfg *config.Config) gin.HandlerFunc {
 		}
 		email := normalizeEmail(body.Email)
 		if msg := validateEmailPassword(email, body.Password); msg != "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-			return
-		}
-		if msg := validateE164Phone(body.PhoneNumber); msg != "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
@@ -188,13 +180,12 @@ func registerHandler(database *gorm.DB, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 		now := time.Now().UTC()
-		// Link points to the frontend login page, which completes verification.
 		verifyURL := stringsTrimSlash(cfg.AppURL) + "/login?verify_email_token=" + emailToken
 
 		pending := models.PendingSignup{
 			Email:               email,
 			PasswordHash:        hash,
-			PhoneNumber:         body.PhoneNumber,
+			PhoneNumber:         "",
 			TradingviewUsername: body.TradingviewUsername,
 			VerifyToken:         emailToken,
 			ExpiresAt:           now.Add(24 * time.Hour),
@@ -266,41 +257,17 @@ func loginHandler(database *gorm.DB, cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
-		if !u.PhoneVerified {
-			out := gin.H{"requires_otp": true, "otp_phase": "signup_phone"}
-			if cfg.SMSBypass && u.OtpCode != nil {
-				out["dev_otp"] = *u.OtpCode
-			}
-			c.JSON(http.StatusOK, out)
-			return
-		}
 
-		otp, err := randomOTP6()
+		now := time.Now().UTC()
+		_ = database.Model(&models.User{}).Where("id = ?", u.ID).Update("last_login_at", now)
+
+		jwtStr, err := createSessionAndJWT(database, cfg, u, c.ClientIP(), c.Request.UserAgent())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate otp"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
 			return
 		}
-		t := time.Now().UTC().Add(10 * time.Minute)
-		u.LoginOtpCode = &otp
-		u.LoginOtpExpiresAt = &t
-		if err := database.Model(&models.User{}).Where("id = ?", u.ID).Updates(map[string]any{
-			"login_otp_code":      otp,
-			"login_otp_expires_at": t,
-		}).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save login otp"})
-			return
-		}
-
-		if err := notify.SendOTP(cfg.SMSBypass, cfg.TwilioAccountSID, cfg.TwilioAuthToken, cfg.TwilioPhoneNumber, u.PhoneNumber, otp); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send SMS"})
-			return
-		}
-
-		out := gin.H{"requires_otp": true}
-		if cfg.SMSBypass {
-			out["dev_otp"] = otp
-		}
-		c.JSON(http.StatusOK, out)
+		setAuthCookie(c, jwtStr)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 
@@ -440,57 +407,30 @@ func verifyEmailHandler(database *gorm.DB, cfg *config.Config) gin.HandlerFunc {
 				return
 			}
 
-			otp, err := randomOTP6()
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate otp"})
-				return
-			}
-			otpExp := now.Add(10 * time.Minute)
-
 			u := models.User{
 				Email:               pending.Email,
 				PasswordHash:        pending.PasswordHash,
-				PhoneNumber:         pending.PhoneNumber,
+				PhoneNumber:         "",
 				EmailVerified:       true,
-				PhoneVerified:       false,
+				PhoneVerified:       true,
 				EmailVerifyToken:    nil,
-				OtpCode:             &otp,
-				OtpExpiresAt:        &otpExp,
 				Plan:                "free",
 				TradingviewUsername: pending.TradingviewUsername,
 				CreatedAt:           now,
 			}
 
 			pendingSnap := pending
-			err = database.Transaction(func(tx *gorm.DB) error {
+			if err := database.Transaction(func(tx *gorm.DB) error {
 				if err := tx.Create(&u).Error; err != nil {
 					return err
 				}
 				return tx.Delete(&pendingSnap).Error
-			})
-			if err != nil {
+			}); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create account"})
 				return
 			}
 
-			if err := notify.SendOTP(cfg.SMSBypass, cfg.TwilioAccountSID, cfg.TwilioAuthToken, cfg.TwilioPhoneNumber, pendingSnap.PhoneNumber, otp); err != nil {
-				restore := pendingSnap
-				restore.ID = 0
-				_ = database.Transaction(func(tx *gorm.DB) error {
-					if err := tx.Unscoped().Delete(&models.User{}, u.ID).Error; err != nil {
-						return err
-					}
-					return tx.Create(&restore).Error
-				})
-				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to send phone verification SMS — open the email link again to retry"})
-				return
-			}
-
-			out := gin.H{"ok": true}
-			if cfg.SMSBypass {
-				out["dev_otp"] = otp
-			}
-			c.JSON(http.StatusOK, out)
+			c.JSON(http.StatusOK, gin.H{"ok": true})
 			return
 		}
 
@@ -790,15 +730,16 @@ func MeHandler() gin.HandlerFunc {
 			tv = *u.TradingviewUsername
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"id":                    u.ID,
-			"email":                 u.Email,
-			"phone_number":          u.PhoneNumber,
-			"phone_verified":        u.PhoneVerified,
-			"email_verified":        u.EmailVerified,
-			"plan":                  u.Plan,
+			"id":                   u.ID,
+			"email":                u.Email,
+			"phone_number":         u.PhoneNumber,
+			"phone_verified":       u.PhoneVerified,
+			"email_verified":       u.EmailVerified,
+			"plan":                 u.Plan,
 			"tradingview_username": tv,
-			"created_at":            u.CreatedAt,
-			"last_login_at":         u.LastLoginAt,
+			"is_admin":             u.IsAdmin,
+			"created_at":           u.CreatedAt,
+			"last_login_at":        u.LastLoginAt,
 		})
 	}
 }

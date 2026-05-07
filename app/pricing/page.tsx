@@ -24,7 +24,7 @@ export default function PricingPage() {
       <PageHeader
         eyebrow="PRICING"
         title="Choose your tier."
-        description="Free by default. Confirm in a short dialog to enable Pro on your account—no payment yet."
+        description="Simple, transparent pricing. Standard at $50/mo, Premium at $200/mo."
       />
       <Container>
         <div className="py-12">

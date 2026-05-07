@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -30,6 +31,33 @@ type Config struct {
 	SMTPUser       string
 	SMTPPassword   string
 	FromEmail      string
+
+	// Stripe — optional; payments are disabled when StripeSecretKey is empty.
+	StripeSecretKey       string
+	StripeWebhookSecret   string
+	StripeStandardPriceID string
+	StripePremiumPriceID  string
+
+	// Admin seed — set these on first deploy to auto-create an admin account on startup.
+	AdminEmail    string
+	AdminPassword string
+	AdminPhone    string
+
+	// Plan prices in USD for revenue calculation (e.g. "29.99").
+	StandardPlanPrice float64
+	PremiumPlanPrice  float64
+}
+
+func parsePrice(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 func envTruthy(key string) bool {
@@ -78,6 +106,18 @@ func Load() (Config, error) {
 		SMTPUser:       os.Getenv("SMTP_USER"),
 		SMTPPassword:   os.Getenv("SMTP_PASSWORD"),
 		FromEmail:      strings.TrimSpace(os.Getenv("FROM_EMAIL")),
+
+		StripeSecretKey:       strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")),
+		StripeWebhookSecret:   strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")),
+		StripeStandardPriceID: strings.TrimSpace(os.Getenv("STRIPE_STANDARD_PRICE_ID")),
+		StripePremiumPriceID:  strings.TrimSpace(os.Getenv("STRIPE_PREMIUM_PRICE_ID")),
+
+		AdminEmail:    strings.TrimSpace(os.Getenv("ADMIN_EMAIL")),
+		AdminPassword: strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")),
+		AdminPhone:    strings.TrimSpace(os.Getenv("ADMIN_PHONE")),
+
+		StandardPlanPrice: parsePrice(os.Getenv("STANDARD_PLAN_PRICE")),
+		PremiumPlanPrice:  parsePrice(os.Getenv("PREMIUM_PLAN_PRICE")),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -97,10 +137,6 @@ func Load() (Config, error) {
 	}
 	if cfg.AppURL == "" {
 		return Config{}, errors.New("APP_URL is required")
-	}
-	if !cfg.SMSBypass &&
-		(cfg.TwilioAccountSID == "" || cfg.TwilioAuthToken == "" || cfg.TwilioPhoneNumber == "") {
-		return Config{}, errors.New("TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER are required (or set SMS_BYPASS=true for local dev)")
 	}
 	if !cfg.EmailBypass {
 		hasSendgrid := cfg.SendgridAPIKey != ""

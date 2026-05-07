@@ -32,8 +32,8 @@ export default function ContactPage() {
     <div>
       <PageHeader
         eyebrow="CONTACT"
-        title="Let’s talk."
-        description="Placeholder copy. Frontend-only contact form UI."
+        title="Let's talk."
+        description="Have a question or need help getting started? We're here."
       />
       <Container>
         <div className="py-12">
@@ -44,18 +44,19 @@ export default function ContactPage() {
                   Contact details
                 </h2>
                 <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                  Placeholder copy for contact details. No backend wiring.
+                  Reach out with any questions about the indicator, your subscription,
+                  or TradingView access.
                 </p>
                 <div className="mt-6 grid gap-3 text-sm text-muted-foreground">
                   <div className="flex items-center justify-between rounded-xl border border-border bg-surface px-4 py-3">
                     <span>Email</span>
-                    <span className="text-muted-foreground">
-                      placeholder@vexis.dev
+                    <span className="font-medium text-foreground">
+                      support@vexis.com
                     </span>
                   </div>
                   <div className="flex items-center justify-between rounded-xl border border-border bg-surface px-4 py-3">
                     <span>Response time</span>
-                    <span className="text-muted-foreground">—</span>
+                    <span className="font-medium text-foreground">Within 24 hours</span>
                   </div>
                 </div>
               </div>
@@ -67,13 +68,13 @@ export default function ContactPage() {
                   <Field
                     label="NAME"
                     name="name"
-                    placeholder="Placeholder name"
+                    placeholder="Your name"
                   />
                   <Field
                     label="EMAIL"
                     name="email"
                     type="email"
-                    placeholder="placeholder@email.com"
+                    placeholder="you@email.com"
                   />
                 </div>
 
@@ -83,7 +84,7 @@ export default function ContactPage() {
                   </span>
                   <textarea
                     name="message"
-                    placeholder="Placeholder message"
+                    placeholder="How can we help?"
                     rows={6}
                     className="resize-none rounded-md border border-border bg-white px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
                   />
@@ -91,7 +92,7 @@ export default function ContactPage() {
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-xs text-muted-foreground">
-                    Placeholder disclaimer text.
+                    We respond to all inquiries within 24 hours.
                   </p>
                   <button
                     type="button"
@@ -108,4 +109,3 @@ export default function ContactPage() {
     </div>
   );
 }
-

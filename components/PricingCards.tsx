@@ -3,64 +3,64 @@
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { motion } from "framer-motion";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
 
-const proCtaClassName =
-  "inline-flex h-11 w-full items-center justify-center rounded-full bg-accent px-5 text-sm font-semibold text-white shadow-sm transition hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)]";
+const primaryBtnCls =
+  "inline-flex h-11 w-full items-center justify-center rounded-full bg-accent px-5 text-sm font-semibold text-white shadow-sm transition hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] disabled:opacity-60";
 
-const freeCtaClassName =
-  "inline-flex h-11 w-full items-center justify-center rounded-full border border-foreground bg-white px-5 text-sm font-semibold text-foreground transition shadow-sm hover:bg-surface";
+const secondaryBtnCls =
+  "inline-flex h-11 w-full items-center justify-center rounded-full border border-foreground bg-white px-5 text-sm font-semibold text-foreground transition shadow-sm hover:bg-surface disabled:opacity-60";
 
-const freeTierCurrentClassName =
-  "inline-flex h-11 w-full cursor-not-allowed items-center justify-center rounded-full border border-border bg-surface px-5 text-sm font-semibold text-muted-foreground opacity-80 select-none";
-
-const proTierCurrentClassName =
+const currentPlanDarkCls =
   "inline-flex h-11 w-full cursor-not-allowed items-center justify-center rounded-full border border-white/25 bg-white/10 px-5 text-sm font-semibold text-white/70 opacity-95 select-none";
+
+const currentPlanLightCls =
+  "inline-flex h-11 w-full cursor-not-allowed items-center justify-center rounded-full border border-border bg-surface px-5 text-sm font-semibold text-muted-foreground opacity-80 select-none";
 
 type Session =
   | { kind: "loading" }
   | { kind: "out" }
   | { kind: "in"; plan: "free" | "pro" };
 
-const freeTier = {
-  name: "Free",
-  price: "$0",
-  note: "Full product access while we are in beta.",
+const standardTier = {
+  name: "Standard",
+  price: "$50",
+  note: "per month",
   features: [
-    "Placeholder feature",
-    "Placeholder feature",
-    "Placeholder feature",
+    "Full TradingView indicator access",
+    "Multi-timeframe signals",
+    "Email & TradingView alerts",
   ],
-  cta: "Start Free",
+  cta: "Get Standard",
   href: "/register" as const,
   featured: false,
+  plan: "standard" as const,
 };
 
-const proTier = {
-  name: "Pro",
-  price: "$0",
-  note: "Enable the Pro label on your account (no payment yet).",
+const premiumTier = {
+  name: "Premium",
+  price: "$200",
+  note: "per month",
   features: [
-    "Placeholder feature",
-    "Placeholder feature",
-    "Placeholder feature",
+    "Everything in Standard",
+    "Priority signal updates",
+    "Private Discord community",
   ],
-  cta: "Go Pro",
+  cta: "Get Premium",
   featured: true,
+  plan: "premium" as const,
 };
 
-const tiers = [freeTier, proTier];
+const tiers = [standardTier, premiumTier];
 
 export function PricingCards() {
-  const router = useRouter();
   const pathname = usePathname() ?? "/";
   const [session, setSession] = useState<Session>({ kind: "loading" });
-  const [proModalOpen, setProModalOpen] = useState(false);
-  const [proSubmitting, setProSubmitting] = useState(false);
-  const [proError, setProError] = useState<string | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState<"standard" | "premium" | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   const loginHref = `/login?next=${encodeURIComponent(pathname === "/" ? "/pricing" : pathname)}`;
 
@@ -68,10 +68,7 @@ export function PricingCards() {
     const load = async () => {
       try {
         const me = await apiFetch<{ plan: string }>("/auth/me");
-        setSession({
-          kind: "in",
-          plan: me.plan === "pro" ? "pro" : "free",
-        });
+        setSession({ kind: "in", plan: me.plan === "pro" ? "pro" : "free" });
       } catch {
         setSession({ kind: "out" });
       }
@@ -82,22 +79,32 @@ export function PricingCards() {
     return () => window.removeEventListener("vexis-auth-changed", onAuth);
   }, []);
 
-  const confirmPro = useCallback(async () => {
-    setProError(null);
-    setProSubmitting(true);
-    try {
-      await apiFetch("/auth/upgrade-pro", { method: "POST" });
-      window.dispatchEvent(new Event("vexis-auth-changed"));
-      setProModalOpen(false);
-      router.push("/dashboard");
-    } catch (err) {
-      setProError(
-        err instanceof Error ? err.message : "Could not enable Pro. Try again.",
-      );
-    } finally {
-      setProSubmitting(false);
-    }
-  }, [router]);
+  const handleCheckout = useCallback(
+    async (plan: "standard" | "premium") => {
+      setCheckoutLoading(plan);
+      setCheckoutError(null);
+      try {
+        const { url } = await apiFetch<{ url: string }>(
+          "/payments/create-checkout-session",
+          { method: "POST", body: JSON.stringify({ plan }) },
+        );
+        window.location.href = url;
+      } catch (err) {
+        const e = err as { status?: number };
+        if (e.status === 503) {
+          setCheckoutError(
+            "Payments are coming soon. Email support@vexis.com to subscribe early.",
+          );
+        } else {
+          setCheckoutError(
+            err instanceof Error ? err.message : "Something went wrong. Please try again.",
+          );
+        }
+        setCheckoutLoading(null);
+      }
+    },
+    [],
+  );
 
   return (
     <>
@@ -192,122 +199,42 @@ export function PricingCards() {
             </motion.ul>
 
             <div className="mt-auto pt-8">
-              {t === proTier ? (
-                session.kind === "loading" ? (
-                  <div
-                    className="h-11 w-full animate-pulse rounded-full bg-white/25"
-                    aria-hidden
-                  />
-                ) : session.kind === "out" ? (
-                  <Link href={loginHref} className={proCtaClassName}>
-                    {t.cta}
-                  </Link>
-                ) : session.plan === "pro" ? (
-                  <span
-                    className={proTierCurrentClassName}
-                    aria-current="true"
-                  >
-                    Current tier
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProError(null);
-                      setProModalOpen(true);
-                    }}
-                    className={proCtaClassName}
-                  >
-                    {t.cta}
-                  </button>
-                )
-              ) : session.kind === "loading" ? (
+              {session.kind === "loading" ? (
                 <div
-                  className="h-11 w-full animate-pulse rounded-full bg-foreground/10"
+                  className={`h-11 w-full animate-pulse rounded-full ${t.featured ? "bg-white/25" : "bg-foreground/10"}`}
                   aria-hidden
                 />
               ) : session.kind === "out" ? (
-                <Link href={freeTier.href} className={freeCtaClassName}>
+                <Link
+                  href={t.featured ? loginHref : standardTier.href}
+                  className={t.featured ? primaryBtnCls : secondaryBtnCls}
+                >
                   {t.cta}
                 </Link>
-              ) : session.plan === "free" ? (
-                <span
-                  className={freeTierCurrentClassName}
-                  aria-current="true"
-                >
-                  Current tier
+              ) : session.plan === "pro" && t.featured ? (
+                <span className={currentPlanDarkCls} aria-current="true">
+                  Current plan
                 </span>
+              ) : session.plan === "pro" && !t.featured ? (
+                <span className={currentPlanLightCls}>On Premium</span>
               ) : (
-                <span
-                  className={freeTierCurrentClassName}
-                  aria-disabled
+                <button
+                  type="button"
+                  disabled={checkoutLoading === t.plan}
+                  onClick={() => void handleCheckout(t.plan)}
+                  className={t.featured ? primaryBtnCls : secondaryBtnCls}
                 >
-                  You&apos;re on Pro
-                </span>
+                  {checkoutLoading === t.plan ? "Redirecting…" : t.cta}
+                </button>
               )}
             </div>
           </motion.div>
         ))}
       </div>
 
-      {proModalOpen ? (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-          role="presentation"
-        >
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
-            aria-label="Close"
-            onClick={() => !proSubmitting && setProModalOpen(false)}
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="pro-modal-title"
-            className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-white p-6 shadow-lg"
-          >
-            <h2
-              id="pro-modal-title"
-              className="font-[var(--font-display)] text-xl font-semibold tracking-[-0.03em] text-foreground"
-            >
-              Enable Pro on your account?
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              Billing is not connected yet. If you confirm, we will mark your
-              account as Pro so you can try Pro features and navigation.
-            </p>
-            {proError ? (
-              <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {proError}
-              </div>
-            ) : null}
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                disabled={proSubmitting}
-                onClick={() => setProModalOpen(false)}
-                className="inline-flex h-11 items-center justify-center rounded-full border border-border bg-white px-5 text-sm font-semibold text-foreground transition hover:bg-surface disabled:opacity-50"
-              >
-                Not now
-              </button>
-              <button
-                type="button"
-                disabled={proSubmitting}
-                onClick={() => void confirmPro()}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-accent px-5 text-sm font-semibold text-white shadow-sm transition hover:shadow-md disabled:opacity-60"
-              >
-                {proSubmitting ? (
-                  <>
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                    Enabling…
-                  </>
-                ) : (
-                  "Yes, enable Pro"
-                )}
-              </button>
-            </div>
-          </div>
+      {checkoutError ? (
+        <div className="mt-6 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
+          {checkoutError}
         </div>
       ) : null}
     </>

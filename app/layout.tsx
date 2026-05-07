@@ -13,7 +13,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "Vexis",
-  description: "Placeholder marketing site for Vexis.",
+  description: "Precision trading signals built for TradingView. Multi-timeframe confluence, smart regime detection, and instant alerts — built for disciplined traders.",
 };
 
 export default function RootLayout({

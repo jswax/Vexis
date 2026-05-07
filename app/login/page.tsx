@@ -22,9 +22,6 @@ function LoginContent() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [otp, setOtp] = useState("");
-  const [needsOtp, setNeedsOtp] = useState(false);
-  const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
   const [resetPass, setResetPass] = useState("");
   const [resetConfirm, setResetConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -38,10 +35,7 @@ function LoginContent() {
         setInfo("Verifying your email…");
         try {
           await apiFetch(`/auth/verify-email?token=${encodeURIComponent(verifyEmailToken)}`);
-          setInfo(
-            "Email verified. Sign in with your password, then enter the SMS code to finish setup.",
-          );
-          // Remove token from URL.
+          setInfo("Email verified. Sign in below.");
           router.replace("/login?email_verified=1");
         } catch (err) {
           setError(
@@ -51,17 +45,10 @@ function LoginContent() {
       })();
     }
     if (searchParams.get("email_verified") === "1") {
-      setInfo(
-        "Email verified. Sign in with your password, then enter the SMS code to finish setup.",
-      );
+      setInfo("Email verified. Sign in below.");
     }
     if (searchParams.get("email_error") === "1") {
       setError("Email verification failed. Try again or contact support.");
-    }
-    if (searchParams.get("sms_verify_error") === "1") {
-      setError(
-        "Could not send the phone verification text. Open the email link again to retry.",
-      );
     }
   }, [searchParams, verifyEmailToken, router]);
 
@@ -73,7 +60,7 @@ function LoginContent() {
       <PageHeader
         eyebrow="LOGIN"
         title="Access Vexis."
-        description="Sign in with your email and password. You will verify an SMS code each time."
+        description="Sign in with your email and password."
       />
       <Container>
         <div className="py-12">
@@ -96,17 +83,12 @@ function LoginContent() {
                   try {
                     await apiFetch("/auth/reset-password", {
                       method: "POST",
-                      body: JSON.stringify({
-                        token: resetToken,
-                        password: resetPass,
-                      }),
+                      body: JSON.stringify({ token: resetToken, password: resetPass }),
                     });
                     setInfo("Password updated. You can sign in.");
                     router.replace("/login");
                   } catch (err) {
-                    setError(
-                      err instanceof Error ? err.message : "Reset failed",
-                    );
+                    setError(err instanceof Error ? err.message : "Reset failed");
                   } finally {
                     setLoading(false);
                   }
@@ -137,16 +119,16 @@ function LoginContent() {
                     className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
                   />
                 </label>
-                {error ? (
+                {error && (
                   <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                     {error}
                   </div>
-                ) : null}
-                {info ? (
+                )}
+                {info && (
                   <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
                     {info}
                   </div>
-                ) : null}
+                )}
                 <button
                   type="submit"
                   disabled={loading}
@@ -168,130 +150,64 @@ function LoginContent() {
                 onSubmit={async (e) => {
                   e.preventDefault();
                   setError(null);
-                  if (!needsOtp) {
-                    if (!emailOk) {
-                      setError("Please enter a valid email.");
-                      return;
-                    }
-                    if (!passwordOk) {
-                      setError("Password must be at least 8 characters.");
-                      return;
-                    }
-                    setLoading(true);
-                    try {
-                      const res = await apiFetch<{
-                        requires_otp?: boolean;
-                        dev_otp?: string;
-                      }>("/auth/login", {
-                        method: "POST",
-                        body: JSON.stringify({ email, password }),
-                      });
-                      if (res.requires_otp) {
-                        setDevOtpHint(
-                          typeof res.dev_otp === "string" ? res.dev_otp : null,
-                        );
-                        setNeedsOtp(true);
-                      } else {
-                        window.dispatchEvent(new Event("vexis-auth-changed"));
-                        router.push(nextPath ?? "/dashboard");
-                      }
-                    } catch (err) {
-                      setError(
-                        err instanceof Error ? err.message : "Login failed",
-                      );
-                    } finally {
-                      setLoading(false);
-                    }
+                  if (!emailOk) {
+                    setError("Please enter a valid email.");
                     return;
                   }
-                  if (otp.length !== 6) {
-                    setError("Enter the 6-digit code.");
+                  if (!passwordOk) {
+                    setError("Password must be at least 8 characters.");
                     return;
                   }
                   setLoading(true);
                   try {
-                    await apiFetch("/auth/verify-otp", {
+                    await apiFetch("/auth/login", {
                       method: "POST",
-                      body: JSON.stringify({ email, otp }),
+                      body: JSON.stringify({ email, password }),
                     });
-                    // Immediately validate that the HttpOnly cookie session is usable.
-                    // If this fails, the browser likely blocked the cross-site cookie or CORS credentials.
-                    await apiFetch("/auth/me");
                     window.dispatchEvent(new Event("vexis-auth-changed"));
                     router.push(nextPath ?? "/dashboard");
                   } catch (err) {
-                    setError(
-                      err instanceof Error
-                        ? err.message
-                        : "Verification failed",
-                    );
+                    setError(err instanceof Error ? err.message : "Login failed");
                   } finally {
                     setLoading(false);
                   }
                 }}
               >
-                {!needsOtp ? (
-                  <>
-                    <label className="grid gap-2">
-                      <span className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">
-                        EMAIL
-                      </span>
-                      <input
-                        type="email"
-                        autoComplete="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-                      />
-                    </label>
-                    <label className="grid gap-2">
-                      <span className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">
-                        PASSWORD
-                      </span>
-                      <input
-                        type="password"
-                        autoComplete="current-password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-                      />
-                    </label>
-                  </>
-                ) : (
-                  <div className="grid gap-2">
-                    <label className="grid gap-2">
-                      <span className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">
-                        SMS CODE
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={6}
-                        value={otp}
-                        onChange={(e) =>
-                          setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))
-                        }
-                        className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-                      />
-                    </label>
-                    {devOtpHint ? (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                        SMS bypass: use code {devOtpHint}
-                      </div>
-                    ) : null}
-                  </div>
-                )}
+                <label className="grid gap-2">
+                  <span className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">
+                    EMAIL
+                  </span>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                  />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">
+                    PASSWORD
+                  </span>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                  />
+                </label>
 
-                {error ? (
+                {error && (
                   <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                     {error}
                   </div>
-                ) : null}
-                {info ? (
+                )}
+                {info && (
                   <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
                     {info}
                   </div>
-                ) : null}
+                )}
 
                 <button
                   type="submit"
@@ -301,71 +217,50 @@ function LoginContent() {
                   {loading ? (
                     <>
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                      {needsOtp ? "Verifying…" : "Signing in…"}
+                      Signing in…
                     </>
-                  ) : needsOtp ? (
-                    "Verify code"
                   ) : (
                     "Sign in"
                   )}
                 </button>
 
-                {!needsOtp ? (
-                  <div className="mt-2 flex flex-col gap-2 text-xs text-muted-foreground">
-                    <div className="flex items-center justify-between">
-                      <span>
-                        No account?{" "}
-                        <Link
-                          href="/register"
-                          className="text-accent hover:underline"
-                        >
-                          Create one
-                        </Link>
-                      </span>
-                      <Link href="/contact" className="text-accent hover:underline">
-                        Need help?
+                <div className="mt-2 flex flex-col gap-2 text-xs text-muted-foreground">
+                  <div className="flex items-center justify-between">
+                    <span>
+                      No account?{" "}
+                      <Link href="/register" className="text-accent hover:underline">
+                        Create one
                       </Link>
-                    </div>
-                    <button
-                      type="button"
-                      className="text-left text-accent hover:underline"
-                      onClick={async () => {
-                        setError(null);
-                        if (!emailOk) {
-                          setError("Enter your email first.");
-                          return;
-                        }
-                        try {
-                          await apiFetch("/auth/forgot-password", {
-                            method: "POST",
-                            body: JSON.stringify({ email }),
-                          });
-                          setInfo("If an account exists, a reset link was sent.");
-                        } catch (err) {
-                          setError(
-                            err instanceof Error
-                              ? err.message
-                              : "Request failed",
-                          );
-                        }
-                      }}
-                    >
-                      Forgot password?
-                    </button>
+                    </span>
+                    <Link href="/contact" className="text-accent hover:underline">
+                      Need help?
+                    </Link>
                   </div>
-                ) : (
                   <button
                     type="button"
-                    className="text-xs text-accent hover:underline"
-                    onClick={() => {
-                      setNeedsOtp(false);
-                      setOtp("");
+                    className="text-left text-accent hover:underline"
+                    onClick={async () => {
                       setError(null);
+                      if (!emailOk) {
+                        setError("Enter your email first.");
+                        return;
+                      }
+                      try {
+                        await apiFetch("/auth/forgot-password", {
+                          method: "POST",
+                          body: JSON.stringify({ email }),
+                        });
+                        setInfo("If an account exists, a reset link was sent.");
+                      } catch (err) {
+                        setError(
+                          err instanceof Error ? err.message : "Request failed",
+                        );
+                      }
                     }}
                   >
-                    Use different account
+                    Forgot password?
                   </button>
-                )}
+                </div>
               </form>
             )}
           </div>

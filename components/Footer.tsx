@@ -8,7 +8,7 @@ const columns: { title: string; links: { href: string; label: string }[] }[] = [
     links: [
       { href: "/pricing", label: "Pricing" },
       { href: "/dashboard", label: "Dashboard" },
-      { href: "/login", label: "Get Started" },
+      { href: "/register", label: "Get Started" },
     ],
   },
   {
@@ -16,23 +16,15 @@ const columns: { title: string; links: { href: string; label: string }[] }[] = [
     links: [
       { href: "/about", label: "About" },
       { href: "/contact", label: "Contact" },
-      { href: "/about", label: "Careers" },
-    ],
-  },
-  {
-    title: "Company",
-    links: [
-      { href: "/about", label: "Docs" },
-      { href: "/about", label: "Changelog" },
       { href: "/contact", label: "Support" },
     ],
   },
   {
-    title: "Social",
+    title: "Community",
     links: [
-      { href: "/about", label: "X" },
-      { href: "/about", label: "YouTube" },
       { href: "/about", label: "Discord" },
+      { href: "/about", label: "X (Twitter)" },
+      { href: "/about", label: "YouTube" },
     ],
   },
 ];
@@ -47,8 +39,7 @@ export function Footer() {
               VEXIS
             </div>
             <p className="mt-4 max-w-sm text-sm text-muted-foreground">
-              Placeholder tagline for a high-end fintech trading indicator
-              product.
+              Precision signals for disciplined traders. Built on TradingView.
             </p>
           </div>
 

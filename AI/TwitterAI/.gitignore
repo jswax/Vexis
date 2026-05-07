@@ -1,0 +1,2 @@
+# Per-scrape tweet manifests (may contain tweet text); keep out of git by default.
+exports/scrapes/

@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(ls /c/Users/antho/Vexis/Vexis/.env*)",
+      "Bash(xargs head:*)",
+      "Bash(pip3 show:*)",
+      "Bash(pip show:*)",
+      "Bash(pip3 install:*)",
+      "Bash(twscrape --help)",
+      "Bash(twscrape search:*)",
+      "Bash(python3:*)",
+      "Bash(sed -n '19,30p' \"C:/Users/antho/AppData/Local/Programs/Python/Python313/Lib/site-packages/twscrape/models.py\")",
+      "Bash(sed -n '160,210p' \"C:/Users/antho/AppData/Local/Programs/Python/Python313/Lib/site-packages/twscrape/models.py\")",
+      "Bash(py:*)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(echo \"tsc exit: $?\")",
+      "Bash(/c/Users/antho/Vexis/Vexis/TwitterAI/node_modules/.bin/tsc --noEmit)",
+      "Bash(twscrape add_accounts:*)",
+      "Bash(twscrape login_accounts:*)",
+      "Bash(twscrape del_accounts vexisdev)",
+      "Bash(twscrape accounts:*)",
+      "Bash(twscrape reset_locks)",
+      "Bash(pip3 index:*)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(grep -n \"split\\\\[0\\\\]\\\\|split\\\\[1\\\\]\\\\|\\\\\\\\.split\\\\|subtasks\\\\[0\\\\]\\\\|subtasks\\\\[1\\\\]\" \"C:/Users/antho/AppData/Local/Programs/Python/Python313/Lib/site-packages/twscrape/xclid.py\")",
+      "WebFetch(domain:docs.twitterapi.io)",
+      "Bash(npm uninstall:*)",
+      "Bash(docker exec:*)",
+      "Bash(.venv/Scripts/python.exe -c ':*)",
+      "Bash(.venv/Scripts/python.exe -m jobs.run_once TSLA NVDA AAPL --max-items 50)",
+      "Bash(python -c \"from sqlalchemy import func; col = func.max\\(1\\); print\\(dir\\(col.desc\\(\\)\\)\\)\")",
+      "Bash(python -c \"from prices.alpaca_bars import PricePoint, get_batch_prices; print\\('alpaca_bars OK'\\)\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\antho\\\\Vexis\\\\Vexis\" -Force)",
+      "Bash(Select-Object Name, Mode)"
+    ]
+  }
+}

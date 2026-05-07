@@ -4,7 +4,6 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 
 import { Container } from "@/components/Container";
-import { BackgroundPaths } from "@/components/ui/background-paths";
 import { DashboardCard } from "./DashboardCard";
 
 const headline = ["The", "indicator", "that", "trades", "with", "you."];
@@ -12,7 +11,7 @@ const accentWords = new Set(["trades"]);
 
 export function Hero() {
   return (
-    <BackgroundPaths className="min-h-[calc(100vh-64px)] bg-white">
+    <div className="min-h-[calc(100vh-64px)] bg-white">
       <Container>
         <div className="grid min-h-[calc(100vh-64px)] items-center gap-12 py-16 md:grid-cols-12 md:gap-10">
           <motion.div
@@ -77,8 +76,8 @@ export function Hero() {
               }}
               className="mt-6 max-w-xl text-base text-muted-foreground sm:text-lg"
             >
-              Placeholder subtext. Ultra clean, data-driven, premium. Frontend
-              only—no auth, no backend, no payments.
+              Precision signals built for TradingView. Know when to enter, when
+              to exit, and when to stay flat — all from a single indicator.
             </motion.p>
 
             <motion.div
@@ -113,7 +112,7 @@ export function Hero() {
           </motion.div>
         </div>
       </Container>
-    </BackgroundPaths>
+    </div>
   );
 }
 
