@@ -33,6 +33,8 @@ type User struct {
 	PhoneChangeOtp     *string `gorm:"column:phone_change_otp"`
 	PhoneChangeOtpExpiresAt *time.Time `gorm:"column:phone_change_otp_expires_at"`
 
+	IsAdmin bool `gorm:"not null;default:false;column:is_admin"`
+
 	LastLoginAt *time.Time `gorm:"column:last_login_at"`
 	CreatedAt   time.Time  `gorm:"not null;column:created_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index"`

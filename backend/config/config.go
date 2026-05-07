@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -36,6 +37,27 @@ type Config struct {
 	StripeWebhookSecret   string
 	StripeStandardPriceID string
 	StripePremiumPriceID  string
+
+	// Admin seed — set these on first deploy to auto-create an admin account on startup.
+	AdminEmail    string
+	AdminPassword string
+	AdminPhone    string
+
+	// Plan prices in USD for revenue calculation (e.g. "29.99").
+	StandardPlanPrice float64
+	PremiumPlanPrice  float64
+}
+
+func parsePrice(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 func envTruthy(key string) bool {
@@ -89,6 +111,13 @@ func Load() (Config, error) {
 		StripeWebhookSecret:   strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")),
 		StripeStandardPriceID: strings.TrimSpace(os.Getenv("STRIPE_STANDARD_PRICE_ID")),
 		StripePremiumPriceID:  strings.TrimSpace(os.Getenv("STRIPE_PREMIUM_PRICE_ID")),
+
+		AdminEmail:    strings.TrimSpace(os.Getenv("ADMIN_EMAIL")),
+		AdminPassword: strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")),
+		AdminPhone:    strings.TrimSpace(os.Getenv("ADMIN_PHONE")),
+
+		StandardPlanPrice: parsePrice(os.Getenv("STANDARD_PLAN_PRICE")),
+		PremiumPlanPrice:  parsePrice(os.Getenv("PREMIUM_PLAN_PRICE")),
 	}
 
 	if cfg.DatabaseURL == "" {

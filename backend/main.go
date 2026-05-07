@@ -86,7 +86,7 @@ func main() {
 
 	engine.Use(cors.New(cors.Config{
 		AllowOrigins:     allowedOrigins,
-		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Authorization", "Content-Type"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
@@ -97,9 +97,12 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
+	db.SeedAdmin(database, cfg.AdminEmail, cfg.AdminPassword, cfg.AdminPhone)
+
 	routes.RegisterAuth(engine, database, &cfg)
 	routes.RegisterAlerts(engine, database, cfg.TradingViewWebhookURL, cfg.AlertSecret)
 	routes.RegisterPayments(engine, database, &cfg)
+	routes.RegisterAdmin(engine, database, &cfg)
 
 	port := cfg.Port
 	if port == "" {

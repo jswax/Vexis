@@ -790,15 +790,16 @@ func MeHandler() gin.HandlerFunc {
 			tv = *u.TradingviewUsername
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"id":                    u.ID,
-			"email":                 u.Email,
-			"phone_number":          u.PhoneNumber,
-			"phone_verified":        u.PhoneVerified,
-			"email_verified":        u.EmailVerified,
-			"plan":                  u.Plan,
+			"id":                   u.ID,
+			"email":                u.Email,
+			"phone_number":         u.PhoneNumber,
+			"phone_verified":       u.PhoneVerified,
+			"email_verified":       u.EmailVerified,
+			"plan":                 u.Plan,
 			"tradingview_username": tv,
-			"created_at":            u.CreatedAt,
-			"last_login_at":         u.LastLoginAt,
+			"is_admin":             u.IsAdmin,
+			"created_at":           u.CreatedAt,
+			"last_login_at":        u.LastLoginAt,
 		})
 	}
 }
