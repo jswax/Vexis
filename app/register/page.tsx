@@ -10,7 +10,6 @@ import { apiFetch } from "@/lib/api";
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
   const [tradingviewUsername, setTradingviewUsername] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -20,17 +19,13 @@ export default function RegisterPage() {
 
   const emailOk = /^\S+@\S+\.\S+$/.test(email);
   const passwordOk = password.length >= 8;
-  const phoneOk =
-    phoneNumber.length >= 10 &&
-    phoneNumber.startsWith("+") &&
-    /^\+[0-9]+$/.test(phoneNumber);
 
   return (
     <div>
       <PageHeader
         eyebrow="REGISTER"
         title="Create your Vexis account."
-        description="You will verify your email and phone before you can sign in."
+        description="Verify your email to activate your account."
       />
       <Container>
         <div className="py-12">
@@ -39,9 +34,7 @@ export default function RegisterPage() {
               className="grid gap-4"
               onSubmit={async (e) => {
                 e.preventDefault();
-                if (registrationComplete) {
-                  return;
-                }
+                if (registrationComplete) return;
                 setError(null);
                 setInfo(null);
                 setDevVerifyUrl(null);
@@ -53,29 +46,22 @@ export default function RegisterPage() {
                   setError("Password must be at least 8 characters.");
                   return;
                 }
-                if (!phoneOk) {
-                  setError(
-                    "Phone must be in E.164 format (e.g. +15551234567).",
-                  );
-                  return;
-                }
                 setLoading(true);
                 try {
-                  const res = await apiFetch<{
-                    dev_email_verify_url?: string;
-                  }>("/auth/register", {
-                    method: "POST",
-                    body: JSON.stringify({
-                      email,
-                      password,
-                      phone_number: phoneNumber,
-                      tradingview_username:
-                        tradingviewUsername.trim() || undefined,
-                    }),
-                  });
+                  const res = await apiFetch<{ dev_email_verify_url?: string }>(
+                    "/auth/register",
+                    {
+                      method: "POST",
+                      body: JSON.stringify({
+                        email,
+                        password,
+                        tradingview_username: tradingviewUsername.trim() || undefined,
+                      }),
+                    },
+                  );
                   setRegistrationComplete(true);
                   setInfo(
-                    "Check your email and verify your account using the link we sent. You can sign in only after your email is verified.",
+                    "Check your email and click the verification link to activate your account.",
                   );
                   setDevVerifyUrl(
                     typeof res.dev_email_verify_url === "string"
@@ -114,21 +100,6 @@ export default function RegisterPage() {
                   autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  disabled={registrationComplete}
-                  className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </label>
-
-              <label className="grid gap-2">
-                <span className="text-xs font-semibold tracking-[0.22em] text-muted-foreground">
-                  PHONE (E.164)
-                </span>
-                <input
-                  type="tel"
-                  autoComplete="tel"
-                  placeholder="+15551234567"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
                   disabled={registrationComplete}
                   className="h-11 rounded-md border border-border bg-white px-4 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
                 />
@@ -181,7 +152,7 @@ export default function RegisterPage() {
                     Creating…
                   </>
                 ) : registrationComplete ? (
-                  "Account pending verification"
+                  "Check your email"
                 ) : (
                   "Create account"
                 )}

@@ -27,7 +27,7 @@ export async function fetchTwitterAiLong(
       headers: init.headers,
       body: init.body ?? undefined,
       dispatcher: agent,
-    });
+    }) as unknown as Response;
   } finally {
     await agent.close();
   }
